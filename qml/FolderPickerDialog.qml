@@ -6,7 +6,7 @@ import Omanta.Runtime
 // picking folders with a GTK portal dialog would be absurd. Navigate by
 // double-click (or Enter), Backspace/the ⬆ button go up; Select takes the
 // highlighted folder, or the folder being viewed when nothing is.
-Dialog {
+OmDialog {
     id: root
 
     property string acceptLabel: qsTr("Select")
@@ -59,13 +59,13 @@ Dialog {
         foldersFirst: true
     }
 
-    footer: DialogButtonBox {
-        Button {
+    footer: OmButtonBox {
+        OmButton {
             text: qsTr("Cancel")
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             onClicked: root.close()
         }
-        Button {
+        OmButton {
             text: root.acceptLabel
             highlighted: true
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole

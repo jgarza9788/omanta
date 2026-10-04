@@ -36,12 +36,19 @@ FocusScope {
         markdownRaw = false;
         pip = false;
         forceActiveFocus();
+        openMotion.restart();
     }
 
     // p: shrink to the corner (keys to the files) or grow back (keys here).
+    // True only while switching to/from PiP, so the card glides then — a
+    // window resize just follows.
+    property bool gliding: false
+
     function togglePip() {
         if (!tab)
             return;
+        gliding = true;
+        glideEnd.restart();
         pip = !pip;
         if (pip)
             tab.focusView();
@@ -103,8 +110,24 @@ FocusScope {
         event.accepted = true;
     }
 
+    Timer {
+        id: glideEnd
+        interval: 220
+        onTriggered: root.gliding = false
+    }
+
+    // The shared open motion (Colors.popInMs): the card settles in, the dim
+    // fades up behind it. Closing is instant, like every surface.
+    ParallelAnimation {
+        id: openMotion
+        NumberAnimation { target: card; property: "opacity"; from: 0; to: 1; duration: Colors.fadeInMs; easing.type: Easing.OutCubic }
+        NumberAnimation { target: card; property: "scale"; from: Colors.popInScale; to: 1; duration: Colors.popInMs; easing.type: Easing.OutCubic }
+        NumberAnimation { target: dimmer; property: "opacity"; from: 0; to: 0.35; duration: Colors.popInMs; easing.type: Easing.OutCubic }
+    }
+
     // The dimmed files behind; a click there closes, like any popover.
     Rectangle {
+        id: dimmer
         anchors.fill: parent
         visible: !root.pip
         color: "black"
@@ -127,6 +150,11 @@ FocusScope {
         y: root.pip ? root.height - height - 16 : inset
         width: root.pip ? pipWidth : root.width - 2 * inset
         height: root.pip ? Math.min(root.height - 32, pipWidth * 0.68) : root.height - 2 * inset
+        Behavior on x { enabled: root.gliding; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on y { enabled: root.gliding; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: root.gliding; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on height { enabled: root.gliding; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        transformOrigin: Item.Center
         radius: Colors.radius
         color: Colors.chrome
         // The accent frame says "you are in the preview now": keys go here

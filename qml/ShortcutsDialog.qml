@@ -7,7 +7,7 @@ import "Keymap.js" as Keymap
 // Nautilus's Keyboard Shortcuts window (Ctrl+?, `?` in vim keys), as one
 // scrollable themed list. The rows come from Keymap.js, which mirrors what
 // Main.qml and Tab.qml bind — when a binding changes, move its row there.
-Dialog {
+OmDialog {
     id: root
     objectName: "shortcutsDialog"
 
@@ -43,14 +43,6 @@ Dialog {
                 out.push({ name: group.name, rows: rows });
         }
         return out;
-    }
-
-    // Like the quick view: an accent frame says the keys are in here now.
-    background: Rectangle {
-        color: Colors.chrome
-        border.color: Colors.accent
-        border.width: 2
-        radius: Colors.radius
     }
 
     onAboutToShow: {

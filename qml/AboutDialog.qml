@@ -3,7 +3,7 @@ import QtQuick.Controls
 import Omanta.Runtime
 
 // About Files — the hamburger menu's last entry, omacalc-flat.
-Dialog {
+OmDialog {
     id: root
 
     anchors.centerIn: Overlay.overlay

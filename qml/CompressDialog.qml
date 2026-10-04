@@ -5,7 +5,7 @@ import Omanta.Runtime
 // Nautilus's "Compress Files and Folders": archive name, compression method
 // with its compatibility note, refused while the name is taken or invalid.
 // Encrypted ZIP is Nautilus's fourth method: zipcrypt with a password field.
-Dialog {
+OmDialog {
     id: root
 
     anchors.centerIn: Overlay.overlay
@@ -70,13 +70,13 @@ Dialog {
         close();
     }
 
-    footer: DialogButtonBox {
-        Button {
+    footer: OmButtonBox {
+        OmButton {
             text: qsTr("Cancel")
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             onClicked: root.close()
         }
-        Button {
+        OmButton {
             text: qsTr("Compress")
             enabled: root.ready
             highlighted: true

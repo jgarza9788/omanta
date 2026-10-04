@@ -59,6 +59,67 @@ const Glyph kGlyphs[] = {
       R"(<path fill="%C%" d="M7 4.7 A2.7 2.7 0 0 1 9.7 2 h4.6 A2.7 2.7 0 0 1 17 4.7 V20.8 a.8 .8 0 0 1 -1.3 .6 L12 18.3 8.3 21.4 A.8 .8 0 0 1 7 20.8 z"/>)" },
     { "star",
       R"(<path fill="%C%" d="M12 2.8 a1 1 0 0 1 .9 .6 l2.3 4.9 5.2 .7 a1 1 0 0 1 .6 1.7 l-3.9 3.7 1 5.3 a1 1 0 0 1 -1.5 1 L12 18.2 l-4.6 2.5 a1 1 0 0 1 -1.5-1 l1-5.3 -3.9-3.7 a1 1 0 0 1 .6-1.7 l5.2-.7 2.3-4.9 a1 1 0 0 1 .9-.6 z"/>)" },
+    // ---- menu and chrome actions: the same flat idiom, a size smaller in use
+    { "open",
+      R"(<path fill="%C%" d="M5 5 h6 v2 H7 v10 h10 v-4 h2 v6 H5 z M13 3 h8 v8 h-2 V6.4 l-7.3 7.3 -1.4 -1.4 L17.6 5 H13 z"/>)" },
+    { "eye",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M12 5 c5 0 8.6 4.4 9.7 6.4 a1.2 1.2 0 0 1 0 1.2 C20.6 14.6 17 19 12 19 S3.4 14.6 2.3 12.6 a1.2 1.2 0 0 1 0 -1.2 C3.4 9.4 7 5 12 5 z M12 8.5 a3.5 3.5 0 1 0 0 7 a3.5 3.5 0 0 0 0 -7 z M12 10.4 a1.6 1.6 0 1 1 0 3.2 a1.6 1.6 0 0 1 0 -3.2 z"/>)" },
+    { "eye-off",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M12 5 c5 0 8.6 4.4 9.7 6.4 a1.2 1.2 0 0 1 0 1.2 C20.6 14.6 17 19 12 19 S3.4 14.6 2.3 12.6 a1.2 1.2 0 0 1 0 -1.2 C3.4 9.4 7 5 12 5 z M12 8.5 a3.5 3.5 0 1 0 0 7 a3.5 3.5 0 0 0 0 -7 z"/><path stroke="%C%" stroke-width="2.2" stroke-linecap="round" d="M4.5 4.5 L19.5 19.5"/>)" },
+    { "tab-new",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M3 7 a2 2 0 0 1 2 -2 h5 l2 2 h7 a2 2 0 0 1 2 2 v9 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z M11.1 10.5 h1.8 v2.6 h2.6 v1.8 h-2.6 v2.6 h-1.8 v-2.6 H8.5 v-1.8 h2.6 z"/>)" },
+    { "window-new",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M3 6 a2 2 0 0 1 2 -2 h14 a2 2 0 0 1 2 2 v12 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z M5 8 v10 h14 V8 z M11.1 10 h1.8 v2.6 h2.6 v1.8 h-2.6 V17 h-1.8 v-2.6 H8.5 v-1.8 h2.6 z"/>)" },
+    { "cut",
+      R"(<circle cx="7" cy="17" r="2.7" fill="none" stroke="%C%" stroke-width="1.9"/><circle cx="17" cy="17" r="2.7" fill="none" stroke="%C%" stroke-width="1.9"/><path stroke="%C%" stroke-width="1.9" stroke-linecap="round" d="M8.9 15 16.5 3.8 M15.1 15 7.5 3.8"/>)" },
+    { "copy",
+      R"(<rect x="8.5" y="8.5" width="12" height="12" rx="2.2" fill="%C%"/><path fill="none" stroke="%C%" stroke-width="1.9" stroke-linecap="round" d="M5.5 15.5 h-.4 A1.6 1.6 0 0 1 3.5 13.9 V5.1 A1.6 1.6 0 0 1 5.1 3.5 h8.8 a1.6 1.6 0 0 1 1.6 1.6 v.4"/>)" },
+    { "paste",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M9 2.8 h6 a1 1 0 0 1 1 1 V5 h2 a2 2 0 0 1 2 2 v12 a2 2 0 0 1 -2 2 H6 a2 2 0 0 1 -2 -2 V7 a2 2 0 0 1 2 -2 h2 V3.8 a1 1 0 0 1 1 -1 z M9.6 4.4 v2 h4.8 v-2 z"/>)" },
+    { "link",
+      R"(<path fill="none" stroke="%C%" stroke-width="2.1" stroke-linecap="round" d="M10.5 13.5 a3.5 3.5 0 0 0 5 0 l3 -3 a3.5 3.5 0 0 0 -5 -5 l-1 1 M13.5 10.5 a3.5 3.5 0 0 0 -5 0 l-3 3 a3.5 3.5 0 0 0 5 5 l1 -1"/>)" },
+    { "folder-new",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M3 6.5 A2 2 0 0 1 5 4.5 h4.6 a2 2 0 0 1 1.5 .7 l1.2 1.4 a2 2 0 0 0 1.5 .7 H19 a2 2 0 0 1 2 2 v8.2 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z M11.1 10 h1.8 v2.6 h2.6 v1.8 h-2.6 V17 h-1.8 v-2.6 H8.5 v-1.8 h2.6 z"/>)" },
+    { "file-new",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M6 4 a2 2 0 0 1 2 -2 h5 l5 5 v13 a2 2 0 0 1 -2 2 H8 a2 2 0 0 1 -2 -2 z M13.2 3.6 v3 a1.2 1.2 0 0 0 1.2 1.2 h3 z M11.1 11.5 h1.8 v2.6 h2.6 v1.8 h-2.6 v2.6 h-1.8 v-2.6 H8.5 v-1.8 h2.6 z"/>)" },
+    { "rename",
+      R"(<path fill="%C%" d="M15.6 3.9 a2 2 0 0 1 2.8 0 l1.7 1.7 a2 2 0 0 1 0 2.8 L9.4 19.1 4 20 l.9 -5.4 z"/>)" },
+    { "undo",
+      R"(<path fill="none" stroke="%C%" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" d="M9 13.5 4.5 9 9 4.5 M4.5 9 H14 a5.5 5.5 0 0 1 0 11 h-3"/>)" },
+    { "redo",
+      R"(<path fill="none" stroke="%C%" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" d="M15 13.5 19.5 9 15 4.5 M19.5 9 H10 a5.5 5.5 0 0 0 0 11 h3"/>)" },
+    { "reload",
+      R"(<path fill="none" stroke="%C%" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" d="M19.4 9.5 A8 8 0 1 0 20 13 M20 4.5 v5 h-5"/>)" },
+    { "delete",
+      R"(<path stroke="%C%" stroke-width="2.3" stroke-linecap="round" d="M6.5 6.5 l11 11 M17.5 6.5 l-11 11"/>)" },
+    { "info",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M12 3 a9 9 0 1 1 0 18 a9 9 0 0 1 0 -18 z M11 10.5 h2 V17 h-2 z M12 6.6 a1.3 1.3 0 1 1 0 2.6 a1.3 1.3 0 0 1 0 -2.6 z"/>)" },
+    { "select-all",
+      R"(<rect x="4" y="4" width="16" height="16" rx="3" fill="none" stroke="%C%" stroke-width="1.8" stroke-dasharray="3 2"/><path fill="none" stroke="%C%" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" d="M8 12.5 l2.8 2.8 L16.5 9"/>)" },
+    { "location",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M12 2.5 a7 7 0 0 1 7 7 c0 5 -7 12 -7 12 S5 14.5 5 9.5 a7 7 0 0 1 7 -7 z M12 6.8 a2.7 2.7 0 1 0 0 5.4 a2.7 2.7 0 0 0 0 -5.4 z"/>)" },
+    { "gear",
+      R"(<circle cx="12" cy="12" r="4" fill="none" stroke="%C%" stroke-width="2.2"/><path stroke="%C%" stroke-width="2.4" stroke-linecap="round" d="M12 2.6 v2.4 M12 19 v2.4 M2.6 12 H5 M19 12 h2.4 M5.4 5.4 l1.7 1.7 M16.9 16.9 l1.7 1.7 M5.4 18.6 l1.7 -1.7 M16.9 7.1 l1.7 -1.7"/>)" },
+    { "keyboard",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M3 7 a2 2 0 0 1 2 -2 h14 a2 2 0 0 1 2 2 v10 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z M6 8.5 h2 v2 H6 z M9.5 8.5 h2 v2 h-2 z M13 8.5 h2 v2 h-2 z M16.3 8.5 h1.7 v2 h-1.7 z M6 12 h2 v2 H6 z M16 12 h2 v2 h-2 z M8.5 15.2 h7 v1.6 h-7 z"/>)" },
+    { "check",
+      R"(<path fill="none" stroke="%C%" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 l4.5 4.5 L19 7.5"/>)" },
+    { "chevron",
+      R"(<path fill="none" stroke="%C%" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" d="M9.5 6 l6 6 -6 6"/>)" },
+    { "bolt",
+      R"(<path fill="%C%" d="M13.5 2 5 13.5 h6 L10 22 l9 -12 h-6.2 z"/>)" },
+    { "list",
+      R"(<path fill="%C%" d="M4 6 h2 v2 H4 z M8 6.2 h12 v1.6 H8 z M4 11 h2 v2 H4 z M8 11.2 h12 v1.6 H8 z M4 16 h2 v2 H4 z M8 16.2 h12 v1.6 H8 z"/>)" },
+    { "columns",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M3 6 a2 2 0 0 1 2 -2 h14 a2 2 0 0 1 2 2 v12 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z M5 6 v12 h3.6 V6 z M10.4 6 v12 h3.2 V6 z M15.4 6 v12 H19 V6 z"/>)" },
+    { "gallery",
+      R"(<path fill="%C%" d="M3 5 a2 2 0 0 1 2 -2 h14 a2 2 0 0 1 2 2 v9 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 z M4 18 h4 v3 H4 z M10 18 h4 v3 h-4 z M16 18 h4 v3 h-4 z"/>)" },
+    { "sort",
+      R"(<path fill="%C%" d="M4 6 h16 v1.8 H4 z M4 11.1 h11 v1.8 H4 z M4 16.2 h6 V18 H4 z"/>)" },
+    { "eject",
+      R"(<path fill="%C%" d="M12 4 l8 9 H4 z M4 16 h16 v3 H4 z"/>)" },
+    { "extract",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M4 5 a1.5 1.5 0 0 1 1.5 -1.5 h13 A1.5 1.5 0 0 1 20 5 v2 a1.5 1.5 0 0 1 -1 1.4 V18 a2.5 2.5 0 0 1 -2.5 2.5 h-9 A2.5 2.5 0 0 1 5 18 V8.4 A1.5 1.5 0 0 1 4 7 z M11.1 10 h1.8 v4.2 l1.6 -1.6 1.2 1.2 L12 17.5 8.3 13.8 l1.2 -1.2 1.6 1.6 z"/>)" },
 };
 
 const char *glyphSvg(const QString &key)
@@ -134,6 +195,10 @@ QString glyphForName(QString name)
 {
     if (name.endsWith(QLatin1String("-symbolic")))
         name.chop(9);
+
+    // A glyph key asked for by name (the menus' icons) is itself.
+    if (glyphSvg(name))
+        return name;
 
     // The app's own chrome (not a GIO name): the view-switch button.
     if (name == QLatin1String("view-grid")) return QStringLiteral("grid");

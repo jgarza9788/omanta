@@ -8,7 +8,7 @@ import Omanta.Runtime
 // Modal, like the app's other dialogs, and it hands the keyboard back on close
 // — a dialog that keeps focus leaves the window unnavigable, which is a bug
 // this app has already had once.
-Dialog {
+OmDialog {
     id: root
 
     // What the dialog is currently claiming, hoisted so the window can publish
@@ -89,8 +89,8 @@ Dialog {
         }
     }
 
-    footer: DialogButtonBox {
-        Button {
+    footer: OmButtonBox {
+        OmButton {
             text: qsTr("Close")
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
         }
@@ -156,17 +156,27 @@ Dialog {
             id: tabs
 
             Layout.fillWidth: true
+            // A hairline under the tabs; the chosen one's accent sits on it.
+            background: Rectangle {
+                color: "transparent"
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: Colors.border
+                }
+            }
 
-            TabButton { text: qsTr("Basic") }
+            OmTabButton { text: qsTr("Basic") }
 
-            TabButton {
+            OmTabButton {
                 text: qsTr("Permissions")
                 // One set of checkboxes over several files is a way to change
                 // the wrong one, so it is only offered for a single item.
                 enabled: properties.itemCount === 1 && properties.mode >= 0
             }
 
-            TabButton {
+            OmTabButton {
                 text: qsTr("Open With")
                 enabled: properties.itemCount === 1 && !properties.isDir
             }
@@ -349,7 +359,7 @@ Dialog {
 
                     Item { Layout.fillWidth: true }
 
-                    Button {
+                    OmButton {
                         text: qsTr("Apply")
                         enabled: properties.canChangeMode
                                  && permissions.draft !== properties.mode
@@ -444,7 +454,7 @@ Dialog {
                     Layout.fillWidth: true
                     spacing: 8
 
-                    Button {
+                    OmButton {
                         text: qsTr("Set as Default")
                         enabled: applicationList.currentIndex >= 0
                         onClicked: {
@@ -457,7 +467,7 @@ Dialog {
                         }
                     }
 
-                    Button {
+                    OmButton {
                         text: qsTr("Open")
                         enabled: applicationList.currentIndex >= 0
                         onClicked: properties.launchWith(

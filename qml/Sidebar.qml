@@ -430,8 +430,10 @@ Rectangle {
         // The detail popover, above the indicator: per-operation rows with a
         // progress bar, the current file with byte/rate details and the time
         // estimate, and a per-operation cancel.
-        Popup {
+        OmPopup {
             id: opsPopover
+            // Opens upward from the indicator.
+            transformOrigin: Popup.Bottom
 
             x: 6
             y: -height - 8
@@ -444,12 +446,6 @@ Rectangle {
             // checklist, 2026-08-09).
             focus: true
             onClosed: root.opsPopoverClosed()
-            background: Rectangle {
-                color: Colors.chrome
-                border.color: Colors.border
-                border.width: 1
-                radius: Colors.radius
-            }
 
             contentItem: Column {
                 spacing: 12
@@ -556,27 +552,31 @@ Rectangle {
     }
 
     // One menu for every row; the click stamps which row it is about.
-    Menu {
+    OmMenu {
         id: rowMenu
 
         property string rowLocation: ""
         property string rowSection: ""
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Open in New Tab")
+            glyph: "tab-new"
             enabled: rowMenu.rowLocation !== "" && rowMenu.rowLocation !== "network:///"
             onTriggered: root.openInNewTabRequested(rowMenu.rowLocation)
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Remove Bookmark")
+            glyph: "bookmark"
             visible: rowMenu.rowSection === "Bookmarks"
             height: visible ? implicitHeight : 0
             onTriggered: places.removeBookmark(rowMenu.rowLocation)
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Empty Trash…")
+            glyph: "trash"
+            destructive: true
             visible: rowMenu.rowLocation === "trash:///"
             height: visible ? implicitHeight : 0
             onTriggered: root.emptyTrashRequested()

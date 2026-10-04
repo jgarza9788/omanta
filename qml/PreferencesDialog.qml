@@ -9,7 +9,7 @@ import Omanta.Runtime
 // Control state is sampled in onAboutToShow rather than bound: interacting
 // with a checkable control writes `checked`/`currentIndex`, which would sever
 // a binding on first use (fifth appearance of this pattern).
-Dialog {
+OmDialog {
     id: root
 
     anchors.centerIn: Overlay.overlay
@@ -30,24 +30,6 @@ Dialog {
     topPadding: 12
 
     readonly property int controlWidth: 190
-
-    background: Rectangle {
-        color: Colors.chrome
-        border.color: Colors.border
-        border.width: 1
-        radius: Colors.radius
-    }
-
-    header: Label {
-        text: root.title
-        textFormat: Text.PlainText
-        color: Colors.text
-        font.pixelSize: 16
-        font.bold: true
-        leftPadding: root.leftPadding
-        rightPadding: root.rightPadding
-        topPadding: 18
-    }
 
     onAboutToShow: {
         syncFromSettings();
@@ -151,7 +133,7 @@ Dialog {
         }
     }
 
-    component PrefComboBox: ComboBox {
+    component PrefComboBox: OmComboBox {
         Layout.minimumWidth: root.controlWidth
         Layout.preferredWidth: root.controlWidth
         Layout.maximumWidth: root.controlWidth

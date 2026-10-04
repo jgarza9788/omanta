@@ -3,7 +3,7 @@ import QtQuick.Controls
 import Omanta.Runtime
 
 // Asks for one line of text — a new folder's name, a file's new name.
-Dialog {
+OmDialog {
     id: root
 
     property string prompt: ""

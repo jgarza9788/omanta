@@ -5,7 +5,7 @@ import Omanta.Runtime
 // The mount credential prompt — GMountOperation's ask-password, as a dialog.
 // Which fields appear is the server's call: smb wants username, domain and
 // password; sftp usually just the password; ftp may allow anonymous.
-Dialog {
+OmDialog {
     id: root
 
     // What the current question needs, set by ask().

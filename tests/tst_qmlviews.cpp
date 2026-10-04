@@ -113,6 +113,7 @@ private Q_SLOTS:
     void columnsAndGalleryViews();
     void dragLabelAndSpringLoadedFolders();
     void dragGestureStartsADrag();
+    void polishScreenshots();
 
 private:
     QTemporaryDir m_cache;
@@ -561,6 +562,15 @@ static void checkDisabledMenuItemsDim(QQuickWindow *window, QQuickItem *tab, con
     QVERIFY(on.isValid() && off.isValid());
     QVERIFY2(on != off, qPrintable(off.name()));
 
+    const QString menuShot = qEnvironmentVariable("OMANTA_TEST_MENU_SCREENSHOT");
+    if (!menuShot.isEmpty()) {
+        // Hover a row, past the open animation, to show the lit state.
+        QTest::mouseMove(newFolder->window(),
+                         newFolder->mapToScene(QPointF(newFolder->width() / 2, newFolder->height() / 2)).toPoint());
+        QTest::qWait(300);
+        QVERIFY(newFolder->window()->grabWindow().save(menuShot));
+    }
+
     QVERIFY(QMetaObject::invokeMethod(menu, "close"));
     QTRY_VERIFY(!menu->property("visible").toBool());
     QVERIFY(QMetaObject::invokeMethod(tab, "navigate", Q_ARG(QVariant, before)));
@@ -644,9 +654,10 @@ static void checkSelectedNameShown(QQuickItem *tab, const QString &longName, con
     };
     tab->setProperty("viewMode", "icon");
     QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, longName)));
-    const QString status = tab->property("statusText").toString();
-    QVERIFY2(status.startsWith(QStringLiteral("“") + longName + QStringLiteral("” selected (")),
-             qPrintable(status));
+    // The status reads "Loading…" until the listing settles; wait it out.
+    QTRY_VERIFY2(tab->property("statusText").toString()
+                     .startsWith(QStringLiteral("“") + longName + QStringLiteral("” selected (")),
+                 qPrintable(tab->property("statusText").toString()));
     QTRY_COMPARE(fullNames().size(), 1);
 
     QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, other)));
@@ -2305,6 +2316,86 @@ void TestQmlViews::dragGestureStartsADrag()
     QVERIFY(!dragSource->property("active").toBool());
     escape.stop();
     QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, start + QPoint(48, 24));
+}
+
+// Screenshots of the floating surfaces for a human to look at — dialogs,
+// popovers, drop-downs, the quick view. Skipped unless
+// OMANTA_TEST_POLISH_SHOTS names a directory to write them to.
+void TestQmlViews::polishScreenshots()
+{
+    const QString dir = qEnvironmentVariable("OMANTA_TEST_POLISH_SHOTS");
+    if (dir.isEmpty())
+        QSKIP("set OMANTA_TEST_POLISH_SHOTS to a directory to take them");
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    {
+        QFile settings(config.filePath("OMANTA_SETTINGS_FILE"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("defaultViewMode=list\n");
+        QFile notes(tree.filePath("notes.md"));
+        QVERIFY(notes.open(QIODevice::WriteOnly));
+        notes.write("# Notes\n\nSome **markdown** with a list:\n\n- one\n- two\n");
+    }
+    tree.writeFile("report.txt", 2048);
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+    tab->forceActiveFocus();
+    const auto shoot = [&](const char *name) {
+        QTest::qWait(350); // past the open motion
+        QVERIFY(window->grabWindow().save(dir + "/" + name + ".png"));
+    };
+
+    auto *prefs = window->findChild<QObject *>("preferencesDialog");
+    QVERIFY(QMetaObject::invokeMethod(prefs, "open"));
+    shoot("preferences");
+    QVERIFY(QMetaObject::invokeMethod(prefs, "close"));
+
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("report.txt"))));
+    QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+    shoot("properties");
+    QVERIFY(QMetaObject::invokeMethod(window->findChild<QObject *>("propertiesDialog"), "close"));
+
+    QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
+    auto *filters = window->findChild<QObject *>("filterPopover");
+    QVERIFY(QMetaObject::invokeMethod(filters, "open"));
+    QTest::qWait(300);
+    auto *combo = window->findChild<QObject *>("rangeCombo");
+    QVERIFY(QMetaObject::invokeMethod(combo->property("popup").value<QObject *>(), "open"));
+    shoot("filter-popover");
+    QVERIFY(QMetaObject::invokeMethod(filters, "close"));
+    QTest::keyClick(window, Qt::Key_Escape);
+
+    tab->forceActiveFocus();
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("notes.md"))));
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    shoot("quickview");
+    QTest::keyClick(window, 'p');
+    shoot("quickview-pip");
+    QTest::keyClick(window, Qt::Key_Escape);
 }
 
 #include "tst_qmlviews.moc"

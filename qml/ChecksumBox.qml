@@ -32,13 +32,13 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
 
-        ComboBox {
+        OmComboBox {
             Layout.preferredWidth: 110
             model: ["SHA-256", "SHA-1", "MD5"]
             onActivated: checksum.algorithm = ["sha256", "sha1", "md5"][currentIndex]
         }
 
-        Button {
+        OmButton {
             Layout.fillWidth: true
             text: checksum.running ? qsTr("Stop") : qsTr("Compute")
             onClicked: checksum.running ? checksum.cancel() : checksum.start()
@@ -66,12 +66,12 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: checksum.result !== ""
 
-        Button {
+        OmButton {
             text: qsTr("Copy")
             onClicked: Clipboard.copyText(checksum.result)
         }
 
-        Button {
+        OmButton {
             text: qsTr("Compare with clipboard")
             onClicked: root.verdict = checksum.matches(Clipboard.text()) ? 1 : -1
         }

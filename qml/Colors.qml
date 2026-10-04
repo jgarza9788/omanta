@@ -33,6 +33,12 @@ QtObject {
     readonly property color error: themed ? Theme.errorColor : "#f7768e"
 
     readonly property int radius: 6
+    // One motion for every floating surface (menus, dialogs, popovers,
+    // drop-downs, the quick view): a quick fade with a slight settle in.
+    // Closing is always instant — a lingering close swallows the next key.
+    readonly property int fadeInMs: 110
+    readonly property int popInMs: 140
+    readonly property real popInScale: 0.96
     readonly property int rowHeight: 30
 
     // Ask the icon provider for the flat theme-coloured glyph instead of the

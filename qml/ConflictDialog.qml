@@ -6,7 +6,7 @@ import Omanta.Runtime
 //
 // "Keep both" is the default and the first button: it is the only choice that
 // cannot lose data, and it should be the one a hurried Return keypress picks.
-Dialog {
+OmDialog {
     id: root
 
     property var conflicting: []
@@ -23,18 +23,18 @@ Dialog {
         open();
     }
 
-    footer: DialogButtonBox {
-        Button {
+    footer: OmButtonBox {
+        OmButton {
             text: qsTr("Keep both")
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
             onClicked: { root.chosen(FileOperations.RenameNew); root.close(); }
         }
-        Button {
+        OmButton {
             text: qsTr("Skip")
             DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
             onClicked: { root.chosen(FileOperations.Skip); root.close(); }
         }
-        Button {
+        OmButton {
             text: qsTr("Replace")
             DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
             onClicked: { root.chosen(FileOperations.Replace); root.close(); }

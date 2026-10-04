@@ -536,19 +536,14 @@ Window {
                             ToolTip.text: qsTr("Filter by date and file type")
                             ToolTip.delay: 600
 
-                            Popup {
+                            OmPopup {
                                 id: filterPopover
+                                objectName: "filterPopover"
 
                                 y: parent.height + 10
                                 x: parent.width - width
                                 width: 330
                                 padding: 14
-                                background: Rectangle {
-                                    color: Colors.chrome
-                                    border.color: Colors.border
-                                    border.width: 1
-                                    radius: Colors.radius
-                                }
 
                                 // Sampled, not bound: interacting with a
                                 // ComboBox writes currentIndex, which would
@@ -597,15 +592,16 @@ Window {
                                     Row {
                                         spacing: 8
 
-                                        ComboBox {
+                                        OmComboBox {
                                             id: rangeCombo
+                                            objectName: "rangeCombo"
                                             width: 150
                                             model: filterPopover.rangeLabels
                                             onActivated: root.currentTab.searchDateRange =
                                                 filterPopover.rangeValues[currentIndex]
                                         }
 
-                                        ComboBox {
+                                        OmComboBox {
                                             id: kindCombo
                                             width: 132
                                             enabled: rangeCombo.currentIndex > 0
@@ -623,7 +619,7 @@ Window {
                                         font.bold: true
                                     }
 
-                                    ComboBox {
+                                    OmComboBox {
                                         id: typeCombo
                                         width: 290
                                         model: filterPopover.typeLabels
@@ -927,7 +923,7 @@ Window {
                     onAccepted: root.connectToServer()
                 }
 
-                Button {
+                OmButton {
                     text: qsTr("Connect")
                     enabled: serverField.text.trim() !== ""
                     onClicked: root.connectToServer()
@@ -944,8 +940,10 @@ Window {
                     // Nautilus's Server Addresses help, honest by
                     // construction: only protocols gvfs here can actually
                     // mount are listed.
-                    Popup {
+                    OmPopup {
                         id: protocolsPopover
+                        // Opens upward from the button.
+                        transformOrigin: Popup.Bottom
 
                         x: parent.width - width
                         y: -height - 6
@@ -1044,8 +1042,10 @@ Window {
                 Text {
                     id: statusLabel
                     textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: implicitWidth
+                    // Its own width, shrinking (and eliding) only when the
+                    // row runs out — not sharing space with the spacer.
+                    Layout.preferredWidth: implicitWidth
+                    Layout.minimumWidth: 40
                     // A long selected name gives up its middle, keeping the start
                     // and the extension (and the "(copy)" before it).
                     elide: Text.ElideMiddle
@@ -1557,6 +1557,7 @@ Window {
 
     PropertiesDialog {
         id: propertiesDialog
+        objectName: "propertiesDialog"
         onClosed: root.returnFocusToView()
     }
 
@@ -1646,7 +1647,7 @@ Window {
         }
     }
 
-    Dialog {
+    OmDialog {
         id: mountQuestion
         property string message: ""
         property var choices: []
@@ -1670,7 +1671,7 @@ Window {
             }
             Repeater {
                 model: mountQuestion.choices
-                Button {
+                OmButton {
                     required property int index
                     required property string modelData
                     width: parent.width
@@ -1732,53 +1733,71 @@ Window {
 
     // ---- main menu (the hamburger) ----------------------------------------
 
-    Menu {
+    OmMenu {
         id: mainMenu
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("New Window")
+            glyph: "window-new"
+            shortcut: "Ctrl+N"
             onTriggered: App.openWindow(root.currentTab ? root.currentTab.path : Platform.homePath())
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("New Tab")
+            glyph: "tab-new"
+            shortcut: "Ctrl+T"
+            vimKey: "t"
             onTriggered: root.addTab(root.currentTab ? root.currentTab.path : Platform.homePath())
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Undo")
+            glyph: "undo"
+            shortcut: "Ctrl+Z"
+            vimKey: "u"
             enabled: FileOperations.canUndo
             onTriggered: FileOperations.undo()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Redo")
+            glyph: "redo"
+            shortcut: "Ctrl+Shift+Z"
+            vimKey: "U"
             enabled: FileOperations.canRedo
             onTriggered: FileOperations.redo()
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Preferences")
+            glyph: "gear"
+            shortcut: "Ctrl+,"
             onTriggered: preferencesDialog.open()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Keyboard Shortcuts")
+            glyph: "keyboard"
+            shortcut: "Ctrl+?"
+            vimKey: "?"
             onTriggered: shortcutsDialog.open()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("About Files")
+            glyph: "info"
             onTriggered: aboutDialog.open()
         }
     }
 
     PreferencesDialog {
         id: preferencesDialog
+        objectName: "preferencesDialog"
         onClosed: root.returnFocusToView()
     }
 
@@ -1802,7 +1821,7 @@ Window {
     // Nautilus's view-options popover (the ▾ next to the view toggle): icon
     // size, the sort orders, hidden files. Sort state lives on the tab, so
     // this menu and the list view's column headers can never disagree.
-    Menu {
+    OmMenu {
         id: viewOptionsMenu
 
         // Sampled when the menu opens rather than bound: triggering a
@@ -1867,78 +1886,82 @@ Window {
             }
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem { text: qsTr("View"); enabled: false }
+        OmMenuItem { text: qsTr("View"); enabled: false; sectionHeader: true }
 
-        MenuItem { id: viewList; text: qsTr("List (Ctrl+1)"); checkable: true; onTriggered: root.setViewMode("list") }
-        MenuItem { id: viewGrid; text: qsTr("Grid (Ctrl+2)"); checkable: true; onTriggered: root.setViewMode("icon") }
-        MenuItem { id: viewColumns; text: qsTr("Columns (Ctrl+3)"); checkable: true; onTriggered: root.setViewMode("columns") }
-        MenuItem { id: viewGallery; text: qsTr("Gallery (Ctrl+4)"); checkable: true; onTriggered: root.setViewMode("gallery") }
+        OmMenuItem { id: viewList; text: qsTr("List"); shortcut: "Ctrl+1"; checkable: true; onTriggered: root.setViewMode("list") }
+        OmMenuItem { id: viewGrid; text: qsTr("Grid"); shortcut: "Ctrl+2"; checkable: true; onTriggered: root.setViewMode("icon") }
+        OmMenuItem { id: viewColumns; text: qsTr("Columns"); shortcut: "Ctrl+3"; checkable: true; onTriggered: root.setViewMode("columns") }
+        OmMenuItem { id: viewGallery; text: qsTr("Gallery"); shortcut: "Ctrl+4"; checkable: true; onTriggered: root.setViewMode("gallery") }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem { text: qsTr("Sort"); enabled: false }
+        OmMenuItem { text: qsTr("Sort"); enabled: false; sectionHeader: true }
 
-        MenuItem {
+        OmMenuItem {
             id: sortAZ
             text: qsTr("A-Z")
+            glyph: "sort"
             checkable: true
             onTriggered: viewOptionsMenu.setSort(FileSortFilterModel.ByName, false)
         }
 
-        MenuItem {
+        OmMenuItem {
             id: sortZA
             text: qsTr("Z-A")
             checkable: true
             onTriggered: viewOptionsMenu.setSort(FileSortFilterModel.ByName, true)
         }
 
-        MenuItem {
+        OmMenuItem {
             id: sortNewest
             text: qsTr("Last Modified")
             checkable: true
             onTriggered: viewOptionsMenu.setSort(FileSortFilterModel.ByModified, true)
         }
 
-        MenuItem {
+        OmMenuItem {
             id: sortOldest
             text: qsTr("First Modified")
             checkable: true
             onTriggered: viewOptionsMenu.setSort(FileSortFilterModel.ByModified, false)
         }
 
-        MenuItem {
+        OmMenuItem {
             id: sortLargest
             text: qsTr("Size")
             checkable: true
             onTriggered: viewOptionsMenu.setSort(FileSortFilterModel.BySize, true)
         }
 
-        MenuItem {
+        OmMenuItem {
             id: sortByType
             text: qsTr("Type")
             checkable: true
             onTriggered: viewOptionsMenu.setSort(FileSortFilterModel.ByType, false)
         }
 
-        MenuSeparator {
+        OmMenuSeparator {
             visible: root.viewMode === "list"
             height: visible ? implicitHeight : 0
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Visible Columns…")
+            glyph: "columns"
             visible: root.viewMode === "list"
             height: visible ? implicitHeight : 0
             onTriggered: visibleColumnsDialog.open()
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             id: hiddenToggle
             text: qsTr("Show Hidden Files")
+            shortcut: "Ctrl+H"
+            vimKey: "."
             checkable: true
             onTriggered: {
                 if (root.currentTab)
@@ -1946,9 +1969,10 @@ Window {
             }
         }
 
-        MenuItem {
+        OmMenuItem {
             id: sidebarToggle
             text: qsTr("Show Sidebar")
+            shortcut: "F9"
             checkable: true
             onTriggered: root.toggleSidebar()
         }
@@ -1958,7 +1982,7 @@ Window {
 
     // The pill's kebab: Nautilus 50's current-folder menu. Folder-scoped —
     // never about the selection, whatever is selected.
-    Menu {
+    OmMenu {
         id: pathBarMenu
 
         property var templateFiles: []
@@ -1979,14 +2003,18 @@ Window {
             }
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("New Folder…")
+            glyph: "folder-new"
+            shortcut: "Ctrl+Shift+N"
+            vimKey: "a"
             enabled: root.currentTab !== null && root.viewWritable
             onTriggered: root.newFolder()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Open With…")
+            glyph: "open"
             enabled: root.currentTab !== null
             onTriggered: {
                 propertiesDialog.show([root.currentTab.path]);
@@ -1994,45 +2022,57 @@ Window {
             }
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Reload")
+            glyph: "reload"
+            shortcut: "Ctrl+R"
             enabled: root.currentTab !== null
             onTriggered: root.currentTab.reload()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Copy Location")
+            glyph: "location"
             enabled: root.currentTab !== null
             onTriggered: Clipboard.copyText(root.currentTab.path)
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Paste")
+            glyph: "paste"
+            shortcut: "Ctrl+V"
+            vimKey: "p"
             enabled: Clipboard.hasFiles && root.currentTab !== null && root.viewWritable
             onTriggered: root.paste()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Paste as Link")
+            glyph: "link"
             enabled: Clipboard.hasFiles && root.currentTab !== null
                      && root.currentTab.batchRenamable && Platform.isLocal(root.currentTab.path)
             onTriggered: FileOperations.createLink(Clipboard.paths(), root.currentTab.path)
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Select All")
+            glyph: "select-all"
+            shortcut: "Ctrl+A"
+            vimKey: "V"
             enabled: root.currentTab !== null
             onTriggered: root.currentTab.selectAll()
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Properties")
+            glyph: "info"
+            shortcut: "Ctrl+I"
             enabled: root.currentTab !== null
             onTriggered: propertiesDialog.show([root.currentTab.path])
         }
@@ -2040,15 +2080,17 @@ Window {
 
     // Its New Document submenu — same template list and transfer flow as the
     // context menu's, but owned here: a Menu has one parent at a time.
-    Menu {
+    OmMenu {
         id: pathBarNewDocumentMenu
         title: qsTr("New Document")
+        glyph: "file-new"
 
         Instantiator {
             model: pathBarMenu.templateFiles
-            MenuItem {
+            OmMenuItem {
                 required property var modelData
                 text: modelData.name
+                glyph: "file-new"
                 onTriggered: root.startTransfer([modelData.path],
                                                 root.currentTab.path, false, false)
             }
@@ -2059,7 +2101,7 @@ Window {
 
     // ---- context menu -----------------------------------------------------
 
-    Menu {
+    OmMenu {
         id: contextMenu
         objectName: "contextMenu"
 
@@ -2133,8 +2175,11 @@ Window {
             }
         }
 
-        MenuItem {
+        OmMenuItem {
             text: "Open"
+            glyph: "open"
+            shortcut: "Enter"
+            vimKey: "l"
             enabled: root.currentTab && root.currentTab.selectionCount > 0
             onTriggered: root.currentTab.activate(root.currentTab.currentIndex)
         }
@@ -2143,30 +2188,32 @@ Window {
         // type, then the full chooser. A static submenu rather than an
         // inserted/removed one: it stays put, greyed out when the selection
         // is not one local file.
-        Menu {
+        OmMenu {
             id: openWithMenu
             title: qsTr("Open With")
+            glyph: "open"
             enabled: contextMenu.openWithPath !== ""
 
             Instantiator {
                 model: contextMenu.openWithApps
-                delegate: MenuItem {
+                delegate: OmMenuItem {
                     required property var modelData
                     text: modelData.name
-                    icon.source: modelData.iconSource
+                    iconUrl: modelData.iconSource
                     onTriggered: Platform.openWith(modelData.id, [contextMenu.openWithPath])
                 }
                 onObjectAdded: (index, object) => openWithMenu.insertItem(index, object)
                 onObjectRemoved: (index, object) => openWithMenu.removeItem(object)
             }
 
-            MenuSeparator {
+            OmMenuSeparator {
                 visible: contextMenu.openWithApps.length > 0
                 height: visible ? implicitHeight : 0
             }
 
-            MenuItem {
+            OmMenuItem {
                 text: qsTr("Other Application…")
+                glyph: "grid"
                 onTriggered: {
                     propertiesDialog.show([contextMenu.openWithPath]);
                     propertiesDialog.selectTab(2);
@@ -2174,16 +2221,19 @@ Window {
             }
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Preview")
+            glyph: "eye"
+            shortcut: "Space"
             enabled: root.currentTab && root.currentTab.selectionCount === 1
             onTriggered: root.currentTab.preview(false)
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: "Open in Terminal"
+            glyph: "terminal"
             // A terminal needs a working directory; the sampled terminalDir
             // is empty when there is nowhere local to land (trash://, an
             // unresolved remote view).
@@ -2191,8 +2241,9 @@ Window {
             onTriggered: Platform.openTerminal(contextMenu.terminalDir)
         }
 
-        MenuItem {
+        OmMenuItem {
             text: "Open in New Tab"
+            glyph: "tab-new"
             enabled: root.currentTab && root.currentTab.selectionCount === 1
             onTriggered: {
                 const selected = root.currentTab.selectedPaths();
@@ -2201,16 +2252,19 @@ Window {
             }
         }
 
-        MenuItem {
+        OmMenuItem {
             text: contextMenu.folderBookmarked ? qsTr("Remove Bookmark") : qsTr("Bookmark This Folder")
+            glyph: "bookmark"
+            shortcut: "Ctrl+D"
             enabled: root.folderBookmarkable
             onTriggered: root.toggleBookmark()
         }
 
-        MenuItem {
+        OmMenuItem {
             // Nautilus's star toggle: Star when anything in the selection is
             // unstarred, Unstar only when the whole selection is starred.
             text: contextMenu.selectionStarred ? qsTr("Unstar") : qsTr("Star")
+            glyph: "star"
             // Local folders, the Starred view itself and Recent (paths in
             // both resolve to the real files); trash rows have nothing to pin.
             enabled: root.currentTab && root.currentTab.selectionCount > 0
@@ -2225,30 +2279,72 @@ Window {
             }
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Cut")
+            glyph: "cut"
+            shortcut: "Ctrl+X"
+            vimKey: "x"
             enabled: root.currentTab && root.currentTab.selectionCount > 0
             onTriggered: Clipboard.cutFiles(root.selection())
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Copy")
+            glyph: "copy"
+            shortcut: "Ctrl+C"
+            vimKey: "y"
             enabled: root.currentTab && root.currentTab.selectionCount > 0
             onTriggered: Clipboard.copyFiles(root.selection())
         }
 
-        MenuItem {
+        OmMenuItem {
+            text: qsTr("Duplicate")
+            glyph: "copy"
+            shortcut: "Ctrl+Shift+D"
+            vimKey: "Y"
+            enabled: root.currentTab && root.currentTab.selectionCount > 0
+                     && !root.viewingRecent && !root.viewingTrash
+            onTriggered: root.duplicateSelected()
+        }
+
+        OmMenuItem {
+            text: qsTr("Copy to Other Pane")
+            glyph: "columns"
+            shortcut: "F5"
+            vimKey: "c"
+            visible: root.splitOpen
+            height: visible ? implicitHeight : 0
+            enabled: root.currentTab && root.currentTab.selectionCount > 0
+            onTriggered: root.transferToOtherPane(false)
+        }
+
+        OmMenuItem {
+            text: qsTr("Move to Other Pane")
+            glyph: "columns"
+            shortcut: "F6"
+            vimKey: "m"
+            visible: root.splitOpen
+            height: visible ? implicitHeight : 0
+            enabled: root.currentTab && root.currentTab.selectionCount > 0
+            onTriggered: root.transferToOtherPane(true)
+        }
+
+        OmMenuItem {
             text: qsTr("Paste")
+            glyph: "paste"
+            shortcut: "Ctrl+V"
+            vimKey: "p"
             enabled: Clipboard.hasFiles && root.viewWritable
             onTriggered: root.paste()
         }
 
-        MenuItem {
+        OmMenuItem {
             // Nautilus's optional Create Link action — hidden until the
             // preference turns it on.
             text: qsTr("Create Link")
+            glyph: "link"
             visible: Settings.showCreateLink
             height: visible ? implicitHeight : 0
             enabled: root.currentTab && root.currentTab.selectionCount > 0
@@ -2256,16 +2352,22 @@ Window {
             onTriggered: FileOperations.createLink(root.selection(), root.currentTab.path)
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("New Folder")
+            glyph: "folder-new"
+            shortcut: "Ctrl+Shift+N"
+            vimKey: "a"
             enabled: root.viewWritable
             onTriggered: root.newFolder()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Rename…")
+            glyph: "rename"
+            shortcut: "F2"
+            vimKey: "r"
             // One item renames inline; several open batch rename, which
             // needs a real directory under it. Recent rows are pointers —
             // nothing there is renamable.
@@ -2275,64 +2377,78 @@ Window {
             onTriggered: root.renameSelected()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Compress…")
+            glyph: "archive"
             enabled: root.currentTab && root.currentTab.selectionCount > 0
                      && root.currentTab.batchRenamable && Platform.isLocal(root.currentTab.path)
             onTriggered: root.compressSelected()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Extract Here")
+            glyph: "extract"
             visible: contextMenu.selectionExtractable
             height: visible ? implicitHeight : 0
             onTriggered: root.extractSelected()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Extract to…")
+            glyph: "extract"
             visible: contextMenu.selectionExtractable
             height: visible ? implicitHeight : 0
             onTriggered: root.extractSelectedTo()
         }
 
-        MenuItem {
+        OmMenuItem {
             // Nautilus's label for dropping a server from the known list.
             // Only for remembered servers — a discovered or mounted row has
             // nothing here to forget.
             text: qsTr("Forget Connection")
+            glyph: "delete"
             visible: root.viewingNetwork
             height: visible ? implicitHeight : 0
             enabled: contextMenu.selectionForgettable
             onTriggered: ServerStore.remove(contextMenu.actionPaths)
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Restore from Trash")
+            glyph: "undo"
             visible: root.viewingTrash
             height: visible ? implicitHeight : 0
             enabled: root.currentTab && root.currentTab.selectionCount > 0
             onTriggered: root.restoreSelected()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Empty Trash…")
+            glyph: "trash"
+            destructive: true
             visible: root.viewingTrash
             height: visible ? implicitHeight : 0
             enabled: root.visibleCount > 0
             onTriggered: emptyTrashConfirm.open()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Move to Trash")
+            glyph: "trash"
+            destructive: true
+            shortcut: "Delete"
+            vimKey: "D"
             visible: !root.viewingTrash
             height: visible ? implicitHeight : 0
             enabled: root.currentTab && root.currentTab.selectionCount > 0
             onTriggered: root.trashSelected()
         }
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Delete Permanently…")
+            glyph: "delete"
+            destructive: true
+            shortcut: "Shift+Del"
             // Nautilus hides this behind a preference — except in the trash,
             // where permanent delete is the only kind there is. Shift+Delete
             // works regardless, as the preference dialog says.
@@ -2342,26 +2458,33 @@ Window {
             onTriggered: root.deleteSelected()
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: qsTr("Properties")
+            glyph: "info"
+            shortcut: "Ctrl+I"
             onTriggered: root.showProperties()
         }
 
-        MenuSeparator {}
+        OmMenuSeparator {}
 
-        MenuItem {
+        OmMenuItem {
             text: root.currentTab && root.currentTab.showHidden ? "Hide Hidden Files" : "Show Hidden Files"
+            glyph: root.currentTab && root.currentTab.showHidden ? "eye-off" : "eye"
+            shortcut: "Ctrl+H"
+            vimKey: "."
             onTriggered: root.currentTab.showHidden = !root.currentTab.showHidden
         }
 
-        MenuItem {
+        OmMenuItem {
             text: "Reload"
+            glyph: "reload"
+            shortcut: "Ctrl+R"
             onTriggered: root.currentTab.reload()
         }
 
-        MenuSeparator {
+        OmMenuSeparator {
             visible: contextMenu.selectionActions.length > 0
             height: visible ? implicitHeight : 0
         }
@@ -2372,9 +2495,10 @@ Window {
         // appends after the static entries above.
         Instantiator {
             model: contextMenu.selectionActions
-            delegate: MenuItem {
+            delegate: OmMenuItem {
                 required property var modelData
                 text: modelData.label
+                glyph: "bolt"
                 onTriggered: UserActions.run(modelData.id, contextMenu.actionPaths)
             }
             onObjectAdded: (index, object) => contextMenu.addItem(object)
@@ -2388,15 +2512,17 @@ Window {
     // Declared outside contextMenu: the parent menu inserts and removes it
     // in onAboutToShow, because Nautilus hides the entry entirely when
     // there are no templates.
-    Menu {
+    OmMenu {
         id: newDocumentMenu
         title: qsTr("New Document")
+        glyph: "file-new"
 
         Instantiator {
             model: contextMenu.templateFiles
-            MenuItem {
+            OmMenuItem {
                 required property var modelData
                 text: modelData.name
+                glyph: "file-new"
                 onTriggered: root.startTransfer([modelData.path],
                                                 root.currentTab.path, false, false)
             }

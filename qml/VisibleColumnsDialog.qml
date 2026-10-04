@@ -9,7 +9,7 @@ import Omanta.Runtime
 //
 // The row model is sampled in onAboutToShow (the checked-write-severs-bindings
 // pattern) and every interaction writes Settings back in full.
-Dialog {
+OmDialog {
     id: root
 
     anchors.centerIn: Overlay.overlay

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import Omanta.Runtime
 
 // For the actions that cannot be taken back.
-Dialog {
+OmDialog {
     id: root
 
     property string message: ""
@@ -17,12 +17,12 @@ Dialog {
     modal: true
     closePolicy: Popup.CloseOnEscape
 
-    footer: DialogButtonBox {
-        Button {
+    footer: OmButtonBox {
+        OmButton {
             text: qsTr("Cancel")
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
         }
-        Button {
+        OmButton {
             text: root.confirmText
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
         }

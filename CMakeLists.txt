@@ -116,6 +116,16 @@ set(OMANTA_QML_FILES
     qml/FileIconView.qml
     qml/FileDrag.qml
     qml/ToolbarButton.qml
+    qml/OmMenu.qml
+    qml/OmMenuItem.qml
+    qml/OmMenuSeparator.qml
+    qml/OmCard.qml
+    qml/OmPopup.qml
+    qml/OmDialog.qml
+    qml/OmButton.qml
+    qml/OmButtonBox.qml
+    qml/OmComboBox.qml
+    qml/OmTabButton.qml
     qml/DialogCloseButton.qml
     qml/PromptDialog.qml
     qml/PreferencesDialog.qml

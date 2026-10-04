@@ -5,7 +5,7 @@ import Omanta.Runtime
 // Nautilus's batch rename, F2 on a multi-selection: a template with
 // automatic numbering, or find-and-replace over the full name, previewed
 // live and refused while any resulting name conflicts.
-Dialog {
+OmDialog {
     id: root
 
     anchors.centerIn: Overlay.overlay
@@ -40,13 +40,13 @@ Dialog {
         close();
     }
 
-    footer: DialogButtonBox {
-        Button {
+    footer: OmButtonBox {
+        OmButton {
             text: qsTr("Cancel")
             DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             onClicked: root.close()
         }
-        Button {
+        OmButton {
             text: qsTr("Rename")
             enabled: renamer.canRename
             highlighted: true
@@ -104,12 +104,12 @@ Dialog {
                     onAccepted: root.performRename()
                 }
 
-                Button {
+                OmButton {
                     id: addButton
                     text: qsTr("+ Add")
                     onClicked: addMenu.popup(addButton, 0, addButton.height)
 
-                    Menu {
+                    OmMenu {
                         id: addMenu
 
                         // Inserting at the cursor rather than appending is
@@ -121,20 +121,20 @@ Dialog {
                             templateField.forceActiveFocus();
                         }
 
-                        MenuItem {
+                        OmMenuItem {
                             text: qsTr("1, 2, 3, 4")
                             onTriggered: addMenu.insert("[1, 2, 3]")
                         }
-                        MenuItem {
+                        OmMenuItem {
                             text: qsTr("01, 02, 03, 04")
                             onTriggered: addMenu.insert("[01, 02, 03]")
                         }
-                        MenuItem {
+                        OmMenuItem {
                             text: qsTr("001, 002, 003, 004")
                             onTriggered: addMenu.insert("[001, 002, 003]")
                         }
-                        MenuSeparator {}
-                        MenuItem {
+                        OmMenuSeparator {}
+                        OmMenuItem {
                             text: qsTr("Original File Name")
                             onTriggered: addMenu.insert("[Original file name]")
                         }
@@ -154,7 +154,7 @@ Dialog {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                Button {
+                OmButton {
                     id: orderButton
 
                     readonly property var labels: [
@@ -167,12 +167,12 @@ Dialog {
                     text: labels[renamer.numberingOrder] + "  ▾"
                     onClicked: orderMenu.popup(orderButton, 0, orderButton.height)
 
-                    Menu {
+                    OmMenu {
                         id: orderMenu
 
                         Repeater {
                             model: orderButton.labels
-                            MenuItem {
+                            OmMenuItem {
                                 required property int index
                                 required property string modelData
                                 text: modelData
