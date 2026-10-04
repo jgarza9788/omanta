@@ -19,6 +19,13 @@ function(omanta_test name)
     set_tests_properties(${name} PROPERTIES TIMEOUT 120)
 endfunction()
 
+omanta_test(tst_quickview
+    ${CMAKE_SOURCE_DIR}/src/QuickViewInfo.cpp
+    ${CMAKE_SOURCE_DIR}/src/Checksum.cpp
+    ${CMAKE_SOURCE_DIR}/src/ArchiveEngine.cpp
+    ${CMAKE_SOURCE_DIR}/src/Location.cpp
+)
+
 omanta_test(tst_directorymodel
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
     ${CMAKE_SOURCE_DIR}/src/DirectoryModel.cpp
@@ -131,6 +138,7 @@ omanta_test(tst_tree
 
 omanta_test(tst_search
     ${CMAKE_SOURCE_DIR}/src/SearchModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/FileSortFilterModel.cpp
     ${CMAKE_SOURCE_DIR}/src/DirectoryModel.cpp
     ${CMAKE_SOURCE_DIR}/src/FileEntry.cpp
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
@@ -138,6 +146,7 @@ omanta_test(tst_search
 
 omanta_test(tst_fts
     ${CMAKE_SOURCE_DIR}/src/SearchModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/FileSortFilterModel.cpp
     ${CMAKE_SOURCE_DIR}/src/DirectoryModel.cpp
     ${CMAKE_SOURCE_DIR}/src/FileEntry.cpp
     ${CMAKE_SOURCE_DIR}/src/Location.cpp

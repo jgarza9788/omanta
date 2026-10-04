@@ -76,17 +76,36 @@ void FileSortFilterModel::setNameFilter(const QString &filter)
 {
     if (m_nameFilter == filter)
         return;
+    // Qt 6.10's filter-change bracket: begin before the state changes,
+    // end once filterAcceptsRow() would answer differently.
+    beginFilterChange();
     m_nameFilter = filter;
+    m_nameFilterError.clear();
+    m_namePattern = namePattern(m_nameFilter, m_nameFilterMode, &m_nameFilterError);
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
     Q_EMIT nameFilterChanged();
-    invalidateFilter();
+}
+
+void FileSortFilterModel::setNameFilterMode(const QString &mode)
+{
+    const QString clean = mode == QLatin1String("regex") ? mode : QStringLiteral("auto");
+    if (m_nameFilterMode == clean)
+        return;
+    beginFilterChange();
+    m_nameFilterMode = clean;
+    m_nameFilterError.clear();
+    m_namePattern = namePattern(m_nameFilter, m_nameFilterMode, &m_nameFilterError);
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    Q_EMIT nameFilterChanged();
 }
 
 void FileSortFilterModel::setFoldersOnly(bool foldersOnly)
 {
     if (m_foldersOnly == foldersOnly)
         return;
+    beginFilterChange();
     m_foldersOnly = foldersOnly;
-    invalidateRowsFilter();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
     Q_EMIT foldersOnlyChanged();
 }
 
@@ -107,11 +126,10 @@ bool FileSortFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sou
     if (m_foldersOnly && !idx.data(DirectoryModel::IsDirRole).toBool())
         return false;
 
-    if (!m_nameFilter.isEmpty()) {
-        const QString name = idx.data(DirectoryModel::DisplayNameRole).toString();
-        if (!name.contains(m_nameFilter, Qt::CaseInsensitive))
-            return false;
-    }
+    if (!m_nameFilter.trimmed().isEmpty()
+        && (!m_nameFilterError.isEmpty()
+            || !m_namePattern.match(idx.data(DirectoryModel::DisplayNameRole).toString()).hasMatch()))
+        return false;
 
     return true;
 }
@@ -284,4 +302,59 @@ int FileSortFilterModel::findByPrefix(const QString &prefix, int startRow) const
             return row;
     }
     return -1;
+}
+
+QRegularExpression FileSortFilterModel::namePattern(const QString &raw, const QString &mode,
+                                                    QString *error)
+{
+    QString pattern = raw.trimmed();
+    bool regex = mode == QLatin1String("regex");
+    if (pattern.startsWith(QLatin1String("re:"))) {
+        regex = true;
+        pattern = pattern.mid(3);
+    }
+    if (pattern.isEmpty())
+        return QRegularExpression();
+
+    QRegularExpression compiled;
+    if (regex) {
+        bool hasUpper = false;
+        for (const QChar c : std::as_const(pattern))
+            hasUpper = hasUpper || c.isUpper();
+        compiled = QRegularExpression(pattern, hasUpper ? QRegularExpression::NoPatternOption
+                                                        : QRegularExpression::CaseInsensitiveOption);
+    } else if (pattern.contains(QLatin1Char('*')) || pattern.contains(QLatin1Char('?'))
+               || pattern.contains(QLatin1Char('['))) {
+        compiled = QRegularExpression(QRegularExpression::wildcardToRegularExpression(
+                                          pattern, QRegularExpression::NonPathWildcardConversion),
+                                      QRegularExpression::CaseInsensitiveOption);
+    } else {
+        compiled = QRegularExpression(QRegularExpression::escape(pattern),
+                                      QRegularExpression::CaseInsensitiveOption);
+    }
+    if (!compiled.isValid() && error)
+        *error = QStringLiteral("Invalid pattern: %1").arg(compiled.errorString());
+    return compiled;
+}
+
+QStringList FileSortFilterModel::namesMatching(const QString &pattern, const QString &mode) const
+{
+    QString error;
+    const QRegularExpression compiled = namePattern(pattern, mode, &error);
+    QStringList names;
+    if (compiled.pattern().isEmpty() || !error.isEmpty())
+        return names;
+    for (int row = 0; row < rowCount(); ++row) {
+        const QModelIndex idx = index(row, 0);
+        if (compiled.match(idx.data(DirectoryModel::DisplayNameRole).toString()).hasMatch())
+            names.append(idx.data(DirectoryModel::NameRole).toString());
+    }
+    return names;
+}
+
+QString FileSortFilterModel::patternError(const QString &pattern, const QString &mode)
+{
+    QString error;
+    namePattern(pattern, mode, &error);
+    return error;
 }

@@ -49,13 +49,24 @@ public:
     // last one. QML owns the window objects; this only tracks them.
     Q_INVOKABLE void windowClosed(QObject *window);
 
+    // Session restore. restoreSession() reopens the windows saved in
+    // `json` (Settings.sessionState) and answers whether it opened any;
+    // tabs whose folder has gone are dropped. sessionJson() is the open
+    // windows' state in that format. Saving happens on its own when the
+    // last window closes or the app quits (see saveSession()).
+    bool restoreSession(const QString &json);
+    QString sessionJson() const;
+    // Off with Settings.restoreSession = false; tests switch it off too.
+    void setSessionSaving(bool enabled) { m_saveSession = enabled; }
+
 Q_SIGNALS:
     void windowCountChanged();
 
 private:
     // Creates, tracks and raises a window, and hands it back — the caller
     // sometimes has something more to ask of the window it just opened.
-    QObject *createWindow(const QString &path, const QString &selectName);
+    QObject *createWindow(const QString &path, const QString &selectName,
+                          const QVariantMap &session = {});
 
     // Groups paths by the folder they should be revealed in, returning the
     // parents in the order they were first seen.
@@ -68,6 +79,10 @@ private:
     // existing window instead of opening a duplicate.
     QObject *windowShowing(const QString &path) const;
 
+    void saveSession(const QList<QObject *> &windows) const;
+    static QVariantMap windowSession(QObject *window);
+
     QQmlApplicationEngine *m_engine;
     QList<QPointer<QObject>> m_windows;
+    bool m_saveSession = false;
 };

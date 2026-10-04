@@ -26,6 +26,8 @@ private Q_SLOTS:
     void iconCaptionsAlwaysThreeSlots();
     void backgroundOpacityValidates();
     void iconSizesPersistAndValidate();
+    void keyboardAndPreviewDefaultsAndValidation();
+    void sessionStateRoundTripsOnOneLine();
 
 private:
     QTemporaryDir m_dir;
@@ -248,6 +250,49 @@ void TestSettings::iconSizesPersistAndValidate()
     Settings garbage;
     QCOMPARE(garbage.iconZoom(), 64);
     QCOMPARE(garbage.listZoom(), 18);
+}
+
+void TestSettings::keyboardAndPreviewDefaultsAndValidation()
+{
+    Settings fresh;
+    QCOMPARE(fresh.keyboardMode(), QStringLiteral("vim"));
+    QCOMPARE(fresh.previewer(), QStringLiteral("builtin"));
+    QCOMPARE(fresh.restoreSession(), true);
+    QCOMPARE(fresh.showInfoPanel(), false);
+
+    fresh.setKeyboardMode(QStringLiteral("classic"));
+    fresh.setPreviewer(QStringLiteral("sushi"));
+    fresh.setShowInfoPanel(true);
+    Settings persisted;
+    QCOMPARE(persisted.keyboardMode(), QStringLiteral("classic"));
+    QCOMPARE(persisted.previewer(), QStringLiteral("sushi"));
+    QCOMPARE(persisted.showInfoPanel(), true);
+
+    fresh.setDefaultViewMode(QStringLiteral("columns"));
+    QCOMPARE(Settings().defaultViewMode(), QStringLiteral("columns"));
+    fresh.setDefaultViewMode(QStringLiteral("gallery"));
+    QCOMPARE(Settings().defaultViewMode(), QStringLiteral("gallery"));
+
+    write("keyboardMode=emacs\npreviewer=qlmanage\ndefaultViewMode=coverflow\n");
+    Settings garbage;
+    QCOMPARE(garbage.keyboardMode(), QStringLiteral("vim"));
+    QCOMPARE(garbage.previewer(), QStringLiteral("builtin"));
+    QCOMPARE(garbage.defaultViewMode(), QStringLiteral("icon"));
+}
+
+void TestSettings::sessionStateRoundTripsOnOneLine()
+{
+    Settings settings;
+    QSignalSpy changed(&settings, &Settings::changed);
+    settings.setSessionState(QStringLiteral("[{\"tabs\":[\"/a\",\n\"/b\"]}]"));
+    QCOMPARE(changed.count(), 0); // bookkeeping, not a preference
+
+    Settings reread;
+    QCOMPARE(reread.sessionState(), QStringLiteral("[{\"tabs\":[\"/a\",\"/b\"]}]"));
+    // And the line break did not leak a stray key into the file.
+    QFile file(m_file);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll().count('\n'), 1);
 }
 
 QTEST_GUILESS_MAIN(TestSettings)

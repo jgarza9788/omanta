@@ -74,6 +74,10 @@ Dialog {
         captionSecond.currentIndex = captionIndex(captions[1]);
         captionThird.currentIndex = captionIndex(captions[2]);
         opacitySlider.value = Settings.backgroundOpacity;
+        keyModeCombo.currentIndex = Settings.keyboardMode === "classic" ? 1 : 0;
+        previewerCombo.currentIndex = Settings.previewer === "sushi" ? 1 : 0;
+        springCombo.currentIndex = Math.max(0, springValues.indexOf(Settings.springLoadDelay));
+        restoreSessionSwitch.checked = Settings.restoreSession;
         syncFileManager();
     }
 
@@ -104,6 +108,8 @@ Dialog {
                                  captionValues[captionSecond.currentIndex],
                                  captionValues[captionThird.currentIndex]];
     }
+
+    readonly property var springValues: ["3", "1.5", "0.75", "off"]
 
     // The three-way performance policies share one value order.
     readonly property var policyValues: ["local-only", "always", "never"]
@@ -228,6 +234,47 @@ Dialog {
                 PrefSwitch {
                     id: treeViewSwitch
                     onToggled: Settings.useTreeView = checked
+                }
+            }
+
+            PrefRow {
+                label: qsTr("Reopen Windows and Tabs at Launch")
+                PrefSwitch {
+                    id: restoreSessionSwitch
+                    onToggled: Settings.restoreSession = checked
+                }
+            }
+
+            SectionTitle { text: qsTr("Keyboard and Preview") }
+            SectionCaption {
+                text: qsTr("Vim keys move with h j k l, filter with / and list every key with ?. Classic keys jump to a name as you type, as in Nautilus. Ctrl, Alt and F-key shortcuts work either way.")
+            }
+
+            PrefRow {
+                label: qsTr("Keys")
+                PrefComboBox {
+                    id: keyModeCombo
+                    model: [qsTr("Vim (h j k l, /, ?)"), qsTr("Classic (type-ahead)")]
+                    onActivated: Settings.keyboardMode = currentIndex === 1 ? "classic" : "vim"
+                }
+            }
+
+            PrefRow {
+                label: qsTr("Space Previews With")
+                PrefComboBox {
+                    id: previewerCombo
+                    model: [qsTr("Built-in Quick View"), qsTr("Sushi")]
+                    onActivated: Settings.previewer = currentIndex === 1 ? "sushi" : "builtin"
+                }
+            }
+
+            PrefRow {
+                label: qsTr("Open Folders While Dragging")
+                PrefComboBox {
+                    id: springCombo
+                    model: [qsTr("After 3 seconds"), qsTr("After 1.5 seconds"),
+                            qsTr("After ¾ second"), qsTr("Never")]
+                    onActivated: Settings.springLoadDelay = root.springValues[currentIndex]
                 }
             }
 

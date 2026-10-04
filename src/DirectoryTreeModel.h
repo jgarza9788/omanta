@@ -75,6 +75,9 @@ public:
     Q_INVOKABLE QVariant valueAt(int row, const QString &roleName) const;
     Q_INVOKABLE int proxyRowForName(const QString &name) const;
     Q_INVOKABLE int findByPrefix(const QString &prefix, int startRow) const;
+    // Select by pattern over the visible (expanded) rows — the flat proxy's
+    // rule, FileSortFilterModel::namePattern.
+    Q_INVOKABLE QStringList namesMatching(const QString &pattern, const QString &mode) const;
 
 Q_SIGNALS:
     void rootModelChanged();

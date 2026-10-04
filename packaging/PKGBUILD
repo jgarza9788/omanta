@@ -18,14 +18,17 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/28allday/omanta"
 license=('MIT')
 install="$pkgname.install"
+# qt6-multimedia and qt6-webengine (Qt Pdf) power the quick view's audio/video
+# and PDF pages; they are linked when present at build time, so they are hard
+# dependencies of this package. -DOMANTA_WITH_MEDIA/PDF=OFF drops them.
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'glib2' 'gvfs' 'hicolor-icon-theme'
-         'libarchive' 'tinysparql')
+         'libarchive' 'tinysparql' 'qt6-multimedia' 'qt6-webengine')
 optdepends=('gvfs-smb: browse smb:// shares'
             'gvfs-mtp: phones over MTP'
             'gvfs-gphoto2: cameras'
             'ffmpegthumbnailer: video thumbnails'
             'localsearch: full-text search'
-            'sushi: Space previews')
+            'sushi: Space previews through Sushi (Preferences → Space Previews With)')
 makedepends=('cmake' 'ninja' 'git')
 source=("$pkgname::git+https://github.com/28allday/omanta.git#tag=v$pkgver")
 sha256sums=('SKIP')

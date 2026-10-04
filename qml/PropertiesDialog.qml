@@ -274,6 +274,16 @@ Dialog {
                                .arg(Platform.formatSize(properties.filesystemSize))
                                .arg(properties.filesystemType)
                     }
+
+                    // On request only: hashing a large file because a dialog
+                    // opened would be a surprise disk read.
+                    ChecksumBox {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 10
+                        visible: properties.itemCount === 1 && !properties.isDir
+                                 && Platform.isLocal(properties.paths[0] || "")
+                        path: visible ? properties.paths[0] : ""
+                    }
                 }
             }
 

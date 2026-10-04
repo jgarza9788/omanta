@@ -2,6 +2,7 @@
 
 #include <QCollator>
 #include <QSortFilterProxyModel>
+#include <QRegularExpression>
 #include <QtQmlIntegration>
 
 // Ordering and visibility. Kept separate from DirectoryModel so that toggling
@@ -15,7 +16,13 @@ class FileSortFilterModel : public QSortFilterProxyModel
     Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortDescendingChanged)
     Q_PROPERTY(bool foldersFirst READ foldersFirst WRITE setFoldersFirst NOTIFY foldersFirstChanged)
     Q_PROPERTY(bool showHidden READ showHidden WRITE setShowHidden NOTIFY showHiddenChanged)
+    // The in-folder filter (`/`), read by namePattern(): plain text, a glob
+    // when it holds wildcards, a regex after `re:` or when nameFilterMode is
+    // "regex". An invalid pattern hides everything and says why in
+    // nameFilterError.
     Q_PROPERTY(QString nameFilter READ nameFilter WRITE setNameFilter NOTIFY nameFilterChanged)
+    Q_PROPERTY(QString nameFilterMode READ nameFilterMode WRITE setNameFilterMode NOTIFY nameFilterChanged)
+    Q_PROPERTY(QString nameFilterError READ nameFilterError NOTIFY nameFilterChanged)
     Q_PROPERTY(bool foldersOnly READ foldersOnly WRITE setFoldersOnly NOTIFY foldersOnlyChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
@@ -53,6 +60,9 @@ public:
 
     QString nameFilter() const { return m_nameFilter; }
     void setNameFilter(const QString &filter);
+    QString nameFilterMode() const { return m_nameFilterMode; }
+    void setNameFilterMode(const QString &mode);
+    QString nameFilterError() const { return m_nameFilterError; }
 
     int count() const { return rowCount(); }
 
@@ -64,6 +74,24 @@ public:
     // Type-ahead: first row whose display name starts with `prefix`, searching
     // forward from `startRow` and wrapping, or -1.
     Q_INVOKABLE int findByPrefix(const QString &prefix, int startRow) const;
+
+    // Select by pattern: the `name` of every visible row whose display name
+    // matches (namePattern rules, `mode` "auto" or "regex"). Empty when the
+    // pattern is invalid.
+    Q_INVOKABLE QStringList namesMatching(const QString &pattern, const QString &mode) const;
+    // Why `pattern` cannot be used, or "" when it can.
+    Q_INVOKABLE static QString patternError(const QString &pattern, const QString &mode);
+
+    // The one rule for "does this name match what was typed", shared with
+    // SearchModel so the filter and the recursive search never disagree.
+    // `mode` "regex" takes the pattern as a regular expression; anything
+    // else is "auto": a `re:` prefix means regex, * ? or [ mean a glob over
+    // the whole name, otherwise a case-insensitive substring. Regexes are
+    // smart-case: insensitive unless the pattern has an upper-case letter.
+    // An empty pattern gives an empty QString pattern (match everything);
+    // an invalid one sets *error.
+    static QRegularExpression namePattern(const QString &pattern, const QString &mode,
+                                          QString *error = nullptr);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
@@ -87,5 +115,8 @@ private:
     bool m_showHidden = false;
     bool m_foldersOnly = false;
     QString m_nameFilter;
+    QString m_nameFilterMode = QStringLiteral("auto");
+    QRegularExpression m_namePattern;
+    QString m_nameFilterError;
     QCollator m_collator;
 };

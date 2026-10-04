@@ -178,7 +178,7 @@ Dialog {
                         color: list.currentIndex === index ? Colors.selectionText
                                                            : Colors.text
                         font.pixelSize: 13
-                        elide: Text.ElideRight
+                        elide: Text.ElideMiddle
                     }
 
                     MouseArea {

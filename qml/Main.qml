@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Omanta.Runtime
+import "Keymap.js" as Keymap
 
 // A window. Several tabs, one visible at a time, plus the chrome that acts on
 // whichever is current. Windows are independent — closing one never disturbs
@@ -11,6 +12,9 @@ Window {
 
     property string initialPath: Platform.homePath()
     property string initialSelection: ""
+    // A saved session for this window ({tabs: [{path, split, second,
+    // active}], current}) — set by App when restoring at launch.
+    property var initialSession: null
 
     // A tab slot holds one pane, or two while split view (F3) is on. The
     // chrome acts on the slot's active pane, so `currentTab` stays the one
@@ -99,6 +103,14 @@ Window {
         currentTab.searchContent = !currentTab.searchContent;
     }
 
+    readonly property string searchMatchMode: currentTab ? currentTab.searchMatchMode : "auto"
+
+    function toggleSearchRegex() {
+        if (!currentTab || currentTab.searchContent)
+            return;
+        currentTab.searchMatchMode = currentTab.searchMatchMode === "regex" ? "auto" : "regex";
+    }
+
     function closeSearch() {
         searchOpen = false;
         if (currentTab)
@@ -176,6 +188,16 @@ Window {
     function addTab(path, selection) {
         tabModel.append({ tabPath: path, tabSelection: selection || "", tabTitle: "" });
         stack.currentIndex = tabModel.count - 1;
+        focusCurrentTab();
+    }
+
+    // The keys follow the tab on screen — after the tab bindings settle.
+    function focusCurrentTab() {
+        Qt.callLater(() => {
+            const slot = tabsRepeater.count > 0 ? tabsRepeater.itemAt(stack.currentIndex) : null;
+            if (slot && slot.activePane)
+                slot.activePane.focusView();
+        });
     }
 
     function closeTab(index) {
@@ -185,6 +207,9 @@ Window {
         }
         tabModel.remove(index);
         stack.currentIndex = Math.min(index, tabModel.count - 1);
+        // Removing the current tab may leave the index unchanged (the next
+        // tab slid into its place), so no change signal: focus explicitly.
+        focusCurrentTab();
     }
 
     function cycleTab(delta) {
@@ -193,8 +218,31 @@ Window {
         stack.currentIndex = (stack.currentIndex + delta + tabModel.count) % tabModel.count;
     }
 
+    // What App saves when this is the last window to close.
+    function sessionState() {
+        const tabs = [];
+        for (let i = 0; i < tabsRepeater.count; ++i) {
+            const slot = tabsRepeater.itemAt(i);
+            if (slot)
+                tabs.push(slot.sessionState());
+        }
+        return { tabs: tabs, current: stack.currentIndex };
+    }
+
+    function restoreSession(session) {
+        for (const saved of session.tabs) {
+            addTab(saved.path);
+            if (saved.split && saved.second)
+                tabsRepeater.itemAt(tabModel.count - 1).restoreSplit(saved.second, saved.active);
+        }
+        stack.currentIndex = Math.max(0, Math.min(tabModel.count - 1, session.current || 0));
+    }
+
     Component.onCompleted: {
-        addTab(root.initialPath, root.initialSelection);
+        if (root.initialSession && root.initialSession.tabs && root.initialSession.tabs.length > 0)
+            restoreSession(root.initialSession);
+        else
+            addTab(root.initialPath, root.initialSelection);
         if (currentTab)
             currentTab.forceActiveFocus();
         // First launch on Omarchy puts the switch in the Toggle menu, once.
@@ -322,7 +370,8 @@ Window {
                     visible: root.searchOpen
                     radius: Colors.radius
                     color: Colors.window
-                    border.color: searchField.activeFocus ? Colors.accent : Colors.border
+                    border.color: root.currentTab && root.currentTab.searchPatternInvalid ? Colors.error
+                                : searchField.activeFocus ? Colors.accent : Colors.border
                     border.width: 1
 
                     RowLayout {
@@ -352,6 +401,12 @@ Window {
                                     root.currentTab.searchQuery = text;
                             }
                             Keys.onEscapePressed: root.closeSearch()
+                            Keys.onPressed: event => {
+                                if (event.key === Qt.Key_R && (event.modifiers & Qt.AltModifier)) {
+                                    root.toggleSearchRegex();
+                                    event.accepted = true;
+                                }
+                            }
                             Keys.onDownPressed: {
                                 // Hand the keyboard to the results without closing.
                                 root.returnFocusToView();
@@ -366,6 +421,46 @@ Window {
                             text: qsTr("searching…")
                             color: Colors.accent
                             font.pixelSize: 11
+                        }
+
+                        // .* — the query as a regular expression. Name
+                        // search only: the full-text index matches words.
+                        Rectangle {
+                            id: regexChip
+                            readonly property bool on: root.searchMatchMode === "regex"
+                            enabled: !root.searchContent
+                            opacity: enabled ? 1 : 0.4
+                            implicitWidth: regexChipLabel.implicitWidth + 14
+                            implicitHeight: 22
+                            radius: 4
+                            color: on && enabled ? Colors.selection
+                                 : regexChipMouse.containsMouse ? Colors.hover : "transparent"
+                            border.color: on && enabled ? Colors.selection : Colors.border
+                            border.width: 1
+
+                            Text {
+                                id: regexChipLabel
+                                textFormat: Text.PlainText
+                                anchors.centerIn: parent
+                                text: ".*"
+                                color: regexChip.on && regexChip.enabled ? Colors.selectionText : Colors.textDim
+                                font.pixelSize: 12
+                                font.family: "monospace"
+                            }
+
+                            MouseArea {
+                                id: regexChipMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleSearchRegex()
+                            }
+
+                            ToolTip.visible: regexChipMouse.containsMouse
+                            ToolTip.text: regexChip.enabled
+                                ? qsTr("Regular expression (Alt+R) — *.glob and re: also work")
+                                : qsTr("Full-text search matches words, not patterns")
+                            ToolTip.delay: 600
                         }
 
                         // File-name vs full-text, Nautilus's search filter
@@ -542,15 +637,13 @@ Window {
                 }
 
                 ToolbarButton {
-                    // Shows the view you'd switch TO: four squares for grid,
-                    // lines for list. "▦" was a crosshatch mess at 15px.
-                    glyph: root.currentTab && root.currentTab.viewMode === "list" ? "view-grid" : ""
-                    symbol: "☰"
-                    tip: "Switch view (Ctrl+1 / Ctrl+2)"
-                    onTriggered: {
-                        if (root.currentTab)
-                            root.setViewMode(root.currentTab.viewMode === "list" ? "icon" : "list");
-                    }
+                    // Cycles list › grid › columns › gallery and shows the
+                    // view you'd switch TO. "▦" was a crosshatch mess at 15px.
+                    readonly property string next: root.nextViewMode()
+                    glyph: next === "icon" ? "view-grid" : ""
+                    symbol: next === "columns" ? "▥" : next === "gallery" ? "▭" : "☰"
+                    tip: qsTr("Switch view (Ctrl+1 list, Ctrl+2 grid, Ctrl+3 columns, Ctrl+4 gallery)")
+                    onTriggered: root.setViewMode(next)
                 }
 
                 ToolbarButton {
@@ -606,7 +699,7 @@ Window {
                             text: tabTitle || Platform.baseName(tabPath) || "/"
                             color: index === stack.currentIndex ? Colors.text : Colors.textDim
                             font.pixelSize: 12
-                            elide: Text.ElideRight
+                            elide: Text.ElideMiddle
                         }
 
                         Text {
@@ -631,6 +724,18 @@ Window {
                                 hoverEnabled: true
                                 onClicked: root.closeTab(index)
                             }
+                        }
+
+                        // A drag resting on a tab switches to it (spring-loaded);
+                        // a drop lands in that tab's folder.
+                        FileDropArea {
+                            anchors.fill: parent
+                            readonly property Item pane: tabsRepeater.itemAt(index)
+                                                         ? tabsRepeater.itemAt(index).activePane : null
+                            destination: pane ? pane.path : tabPath
+                            springLoaded: index !== stack.currentIndex
+                            onSprung: stack.currentIndex = index
+                            onFilesDropped: urls => { if (pane) pane.requestDrop(urls, pane.path); }
                         }
 
                         MouseArea {
@@ -713,11 +818,26 @@ Window {
                     root.sidebarOverlayOpen = false;
                 }
                 onEmptyTrashRequested: emptyTrashConfirm.open()
+                onKeyboardReleased: {
+                    root.sidebarOverlayOpen = false;
+                    root.returnFocusToView();
+                }
+            }
+
+            InfoPanel {
+                id: infoPanel
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+                width: Math.min(300, parent.width * 0.32)
+                visible: Settings.showInfoPanel
+                tab: visible ? root.currentTab : null
             }
 
             Item {
                 anchors.fill: parent
                 anchors.leftMargin: root.sidebarInline ? sidebar.width : 0
+                anchors.rightMargin: infoPanel.visible ? infoPanel.width : 0
 
                 // The file views' backdrop — the window tone that used to be
                 // the root window colour before the root went transparent.
@@ -732,10 +852,10 @@ Window {
                     anchors.fill: parent
                     currentIndex: 0
 
-                    onCurrentIndexChanged: {
-                        if (root.currentTab)
-                            root.currentTab.forceActiveFocus();
-                    }
+                    // Deferred: in this handler `currentTab` can still name the
+                    // tab being hidden (its binding may not have re-run yet),
+                    // and focusing that leaves the keys nowhere visible.
+                    onCurrentIndexChanged: root.focusCurrentTab()
 
                     Repeater {
                         id: tabsRepeater
@@ -759,8 +879,16 @@ Window {
                             onTransferRequested: (sources, destination, isMove) =>
                                 root.startTransfer(sources, destination, isMove, false)
                             onPreviewUnavailable: root.flash(qsTr("Space previews need Sushi — install the sushi package"))
+                            onCommandRequested: (command, arg) => root.runCommand(command, arg)
                         }
                     }
+                }
+
+                // Over the files only — the sidebar and chrome stay usable.
+                QuickView {
+                    id: quickView
+                    anchors.fill: parent
+                    z: 10
                 }
             }
         }
@@ -903,24 +1031,75 @@ Window {
                 color: Colors.border
             }
 
-            Text {
-                textFormat: Text.PlainText
+            // The status, then a hairline and the one key worth knowing:
+            // "10 items  |  [?] all keys".
+            RowLayout {
                 anchors.left: parent.left
                 anchors.leftMargin: 12
+                anchors.right: freeSpaceLabel.visible ? freeSpaceLabel.left : parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 10
+
+                Text {
+                    id: statusLabel
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: implicitWidth
+                    // A long selected name gives up its middle, keeping the start
+                    // and the extension (and the "(copy)" before it).
+                    elide: Text.ElideMiddle
+                    // While something is running, the status line belongs to it.
+                    text: FileOperations.busy ? FileOperations.statusText
+                        : FileOperations.lastError !== "" ? FileOperations.lastError
+                        : root.flashText !== "" ? root.flashText
+                        : root.currentTab ? root.currentTab.statusText : ""
+                    color: !FileOperations.busy
+                           && (FileOperations.lastError !== "" || root.flashText !== "")
+                           ? Colors.error : Colors.textDim
+                    font.pixelSize: 11
+                }
+
+                Rectangle {
+                    Layout.preferredWidth: 1
+                    Layout.preferredHeight: 12
+                    color: Colors.border
+                }
+
+                Text {
+                    id: keysHint
+                    textFormat: Text.PlainText
+                    // `?` is a vim key; classic mode types it into type-ahead.
+                    text: (Settings.keyboardMode === "vim" ? "[?]" : "[Ctrl+?]") + " " + qsTr("all keys")
+                    color: keysMouse.containsMouse ? Colors.text : Colors.textDim
+                    font.pixelSize: 11
+
+                    MouseArea {
+                        id: keysMouse
+                        anchors.fill: parent
+                        anchors.margins: -4
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: shortcutsDialog.open()
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+
+            // Room left where this folder lives — re-read whenever the folder
+            // changes or an operation finishes, which is when it moves.
+            Text {
+                id: freeSpaceLabel
+                textFormat: Text.PlainText
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                // A long selected name gives up its middle, keeping the start
-                // and the extension (and the "(copy)" before it).
-                elide: Text.ElideMiddle
-                // While something is running, the status line belongs to it.
-                text: FileOperations.busy ? FileOperations.statusText
-                    : FileOperations.lastError !== "" ? FileOperations.lastError
-                    : root.flashText !== "" ? root.flashText
-                    : root.currentTab ? root.currentTab.statusText : ""
-                color: !FileOperations.busy
-                       && (FileOperations.lastError !== "" || root.flashText !== "")
-                       ? Colors.error : Colors.textDim
+                readonly property real bytes: FileOperations.busy, root.currentPath
+                                              ? Platform.freeSpace(root.currentPath) : -1
+                visible: !FileOperations.busy && bytes >= 0
+                text: qsTr("%1 free").arg(Platform.formatSize(bytes))
+                color: Colors.textDim
                 font.pixelSize: 11
             }
 
@@ -990,12 +1169,116 @@ Window {
         onTriggered: root.flashText = ""
     }
 
+    // ---- keyboard ---------------------------------------------------------
+
+    readonly property bool quickViewOpen: quickView.open
+    readonly property bool quickViewPip: quickView.pip
+    // The quick view's subject, for WindowState and the tests.
+    readonly property string quickViewPath: quickView.location
+
+    // Vim keys that reach past the pane: Keymap.js lists them all.
+    function runCommand(command, arg) {
+        switch (command) {
+        case "copy": Clipboard.copyFiles(selection()); break;
+        case "cut": Clipboard.cutFiles(selection()); break;
+        case "paste": paste(); break;
+        case "duplicate": duplicateSelected(); break;
+        case "copyToOther": transferToOtherPane(false); break;
+        case "moveToOther": transferToOtherPane(true); break;
+        case "rename": renameSelected(); break;
+        case "newFolder": newFolder(); break;
+        case "trash": trashSelected(); break;
+        case "undo": FileOperations.undo(); break;
+        case "redo": FileOperations.redo(); break;
+        case "newTab": addTab(currentTab ? currentTab.path : Platform.homePath()); break;
+        case "closeTab": closeTab(stack.currentIndex); break;
+        case "otherPane": if (currentSlot) currentSlot.cyclePane(); break;
+        case "search": openSearch(); break;
+        case "selectPattern": askSelectPattern(); break;
+        case "help": shortcutsDialog.open(); break;
+        case "info": toggleInfoPanel(); break;
+        case "pip":
+            if (quickView.open)
+                quickView.togglePip();
+            break;
+        case "quickview":
+            if (quickView.open)
+                quickView.close();
+            else if (currentTab)
+                quickView.show(currentTab);
+            break;
+        case "place": sidebar.activatePlace(arg); break;
+        case "sidebar":
+            if (sidebarNarrow)
+                sidebarOverlayOpen = true;
+            else if (!Settings.showSidebar)
+                Settings.showSidebar = true;
+            sidebar.focusPlaces();
+            break;
+        case "escape":
+            if (searchOpen)
+                closeSearch();
+            break;
+        }
+    }
+
+    function toggleInfoPanel() { Settings.showInfoPanel = !Settings.showInfoPanel; }
+
+    // Ctrl+Shift+D / vim Y: a copy beside each selected item, "name (copy)".
+    // The copy's own rename-on-conflict naming does the work; grouped by
+    // folder because search results span several.
+    function duplicateSelected() {
+        if (!currentTab || viewingRecent || viewingTrash)
+            return;
+        const byFolder = {};
+        for (const path of selection()) {
+            const parent = Platform.parentPath(path);
+            (byFolder[parent] = byFolder[parent] || []).push(path);
+        }
+        for (const folder in byFolder)
+            FileOperations.copy(byFolder[folder], folder, FileOperations.RenameNew);
+    }
+
+    // Split view's F5 / F6 (vim c / m): the selection into the other pane's
+    // folder, through the same conflict dialog as paste.
+    function transferToOtherPane(isMove) {
+        const other = currentSlot ? currentSlot.otherPane : null;
+        if (!other) {
+            flash(qsTr("Open split view (F3) to copy or move between panes"));
+            return;
+        }
+        const paths = selection();
+        if (paths.length === 0 || other.path === currentTab.path)
+            return;
+        const target = other.path;
+        if (target === "trash:///" || target === "recent:///" || target === "network:///"
+            || target === "starred:///") {
+            flash(qsTr("The other pane is not a folder files can go into"));
+            return;
+        }
+        startTransfer(paths, target, isMove, false);
+    }
+
+    function askSelectPattern() {
+        if (!currentTab)
+            return;
+        selectPatternPrompt.initialText = "*";
+        selectPatternPrompt.ask();
+    }
+
     // ---- file operations --------------------------------------------------
 
     function selection() { return currentTab ? currentTab.selectedPaths() : []; }
 
     // Switching views also persists the choice as the default for new tabs
     // and windows — Nautilus writes default-folder-viewer the same way.
+    readonly property var viewModes: ["list", "icon", "columns", "gallery"]
+
+    function nextViewMode() {
+        const at = currentTab ? viewModes.indexOf(currentTab.viewMode) : -1;
+        return viewModes[(at + 1) % viewModes.length];
+    }
+
     function setViewMode(mode) {
         if (!currentTab)
             return;
@@ -1220,6 +1503,24 @@ Window {
         onClosed: root.returnFocusToView()
         prompt: qsTr("Name for the new folder")
         onAccepted_: name => FileOperations.createFolder(root.currentTab.path, name)
+    }
+
+    // Select by pattern (Ctrl+S, vim *): a glob by default, re: for a regex.
+    PromptDialog {
+        id: selectPatternPrompt
+        onClosed: root.returnFocusToView()
+        prompt: qsTr("Select items matching (*.jpg, IMG_????.*, re:^draft)")
+        onAccepted_: pattern => {
+            const error = FileSortFilterModel.patternError(pattern, "auto");
+            if (error !== "") {
+                root.flash(error);
+                return;
+            }
+            const count = root.currentTab.selectMatching(pattern, "auto");
+            root.flash(count === 0 ? qsTr("Nothing matches “%1”").arg(pattern)
+                                   : count === 1 ? qsTr("1 item selected")
+                                   : qsTr("%1 items selected").arg(count));
+        }
     }
 
     PromptDialog {
@@ -1517,6 +1818,10 @@ Window {
             sortLargest.checked = key === FileSortFilterModel.BySize && desc;
             sortByType.checked = key === FileSortFilterModel.ByType && !desc;
             hiddenToggle.checked = root.showHidden;
+            viewList.checked = root.viewMode === "list";
+            viewGrid.checked = root.viewMode === "icon";
+            viewColumns.checked = root.viewMode === "columns";
+            viewGallery.checked = root.viewMode === "gallery";
             sidebarToggle.checked = root.sidebarVisible;
         }
 
@@ -1561,6 +1866,15 @@ Window {
                 }
             }
         }
+
+        MenuSeparator {}
+
+        MenuItem { text: qsTr("View"); enabled: false }
+
+        MenuItem { id: viewList; text: qsTr("List (Ctrl+1)"); checkable: true; onTriggered: root.setViewMode("list") }
+        MenuItem { id: viewGrid; text: qsTr("Grid (Ctrl+2)"); checkable: true; onTriggered: root.setViewMode("icon") }
+        MenuItem { id: viewColumns; text: qsTr("Columns (Ctrl+3)"); checkable: true; onTriggered: root.setViewMode("columns") }
+        MenuItem { id: viewGallery; text: qsTr("Gallery (Ctrl+4)"); checkable: true; onTriggered: root.setViewMode("gallery") }
 
         MenuSeparator {}
 
@@ -2091,6 +2405,113 @@ Window {
         }
     }
 
+    // ---- drag label --------------------------------------------------------
+
+    // Beneath every real drop target: keeps the drag card following the
+    // pointer over the toolbar, status line and other places that take no
+    // drop (it shows the card without an action there, and ignores drops).
+    FileDropArea {
+        parent: root.contentItem
+        anchors.fill: parent
+        z: -1000
+        destination: ""
+    }
+
+    // omanta's own drag: the one card, drawn here and live —
+    //   [▣ 5 items | Move]
+    // the right-hand section following Ctrl / Shift / Alt and the target
+    // under the pointer (no section where a drop would do nothing).
+    Rectangle {
+        id: dragCard
+        objectName: "dragCard"
+        parent: root.contentItem
+        z: 1000
+        visible: DragState.ownDrag && DragState.area !== null && DragState.window === root
+        x: DragState.x - DragState.cardHotSpot.x
+        y: DragState.y - DragState.cardHotSpot.y
+        width: cardRow.implicitWidth + 24
+        height: 56
+        radius: Colors.radius
+        color: Qt.alpha(Colors.chrome, 1)
+        border.color: DragState.destructive ? Colors.error
+                    : DragState.word !== "" ? Colors.accent : Colors.border
+
+        Row {
+            id: cardRow
+            x: 10
+            height: parent.height
+            spacing: 10
+
+            Image {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 36
+                height: 36
+                source: DragState.cardIcon
+                sourceSize: Qt.size(36, 36)
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+            }
+
+            Text {
+                objectName: "dragCardText"
+                textFormat: Text.PlainText
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, 220)
+                text: DragState.cardText
+                color: Colors.text
+                font.pixelSize: 13
+                elide: Text.ElideMiddle
+            }
+
+            Rectangle {
+                visible: DragState.word !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: 24
+                color: Colors.border
+            }
+
+            Text {
+                id: dragCardAction
+                objectName: "dragCardAction"
+                textFormat: Text.PlainText
+                visible: DragState.word !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                text: DragState.word
+                color: DragState.destructive ? Colors.error : Colors.accent
+                font.pixelSize: 13
+                font.bold: true
+            }
+        }
+    }
+
+    // A drag from another app has no omanta card: a badge beside the
+    // pointer says what a drop here would do.
+    Rectangle {
+        id: dragLabel
+        objectName: "dragLabel"
+        parent: root.contentItem
+        z: 1000
+        visible: !DragState.ownDrag && DragState.active && DragState.window === root
+        x: Math.min(DragState.x + 18, root.width - width - 4)
+        y: Math.min(DragState.y + 22, root.height - height - 4)
+        width: dragLabelText.implicitWidth + 16
+        height: dragLabelText.implicitHeight + 10
+        radius: Colors.radius
+        color: DragState.destructive ? Colors.error : Colors.accent
+
+        Text {
+            id: dragLabelText
+            objectName: "dragLabelText"
+            textFormat: Text.PlainText
+            anchors.centerIn: parent
+            text: DragState.label
+            color: Colors.window.hslLightness > 0.5 ? "#ffffff" : Qt.alpha(Colors.window, 1)
+            font.pixelSize: 13
+            font.bold: true
+        }
+    }
+
     // ---- mouse back/forward ----------------------------------------------
 
     // Buttons 8 and 9 on a mouse are back and forward everywhere else on the
@@ -2130,9 +2551,20 @@ Window {
     // Split view: F3 toggles the second pane, F6 moves the keyboard (and the
     // chrome) between panes — the classic dual-pane bindings.
     Shortcut { sequence: "F3"; onActivated: if (root.currentSlot) root.currentSlot.toggleSplit() }
-    Shortcut { sequence: "F6"; onActivated: if (root.currentSlot) root.currentSlot.cyclePane() }
+    // With the split open, F5 / F6 copy / move the selection across — the
+    // dual-pane convention — and Ctrl+F6 (or Tab in vim keys) switches panes.
+    Shortcut { sequence: "F6"; onActivated: if (root.splitOpen) root.transferToOtherPane(true) }
+    Shortcut { sequence: "Ctrl+F6"; onActivated: if (root.currentSlot) root.currentSlot.cyclePane() }
 
     Shortcut { sequence: "F9"; onActivated: root.toggleSidebar() }
+    // In picture-in-picture the files have the keys; Esc still closes the
+    // card first (one layer at a time), unless a field is being typed in.
+    Shortcut {
+        sequence: "Escape"
+        enabled: quickView.pip && root.currentTab !== null && !root.currentTab.filterEditing
+                 && !searchField.activeFocus
+        onActivated: quickView.close()
+    }
     // Only while the sidebar is slid over; otherwise Escape stays the views'.
     Shortcut {
         sequence: "Escape"
@@ -2146,7 +2578,19 @@ Window {
     Shortcut { sequence: "Ctrl+H"; onActivated: if (root.currentTab) root.currentTab.showHidden = !root.currentTab.showHidden }
     Shortcut { sequence: "Ctrl+A"; onActivated: if (root.currentTab) root.currentTab.selectAll() }
     Shortcut { sequence: "Ctrl+R"; onActivated: if (root.currentTab) root.currentTab.reload() }
-    Shortcut { sequence: "F5"; onActivated: if (root.currentTab) root.currentTab.reload() }
+    Shortcut {
+        sequence: "F5"
+        onActivated: {
+            if (root.splitOpen)
+                root.transferToOtherPane(false);
+            else if (root.currentTab)
+                root.currentTab.reload();
+        }
+    }
+    Shortcut { sequence: "F11"; onActivated: root.toggleInfoPanel() }
+    Shortcut { sequence: "Ctrl+S"; onActivated: root.askSelectPattern() }
+    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: if (root.currentTab) root.currentTab.openFilter() }
+    Shortcut { sequence: "Ctrl+Shift+D"; onActivated: root.duplicateSelected() }
 
     Shortcut { sequence: "Delete"; onActivated: root.trashSelected() }
     Shortcut { sequence: "Shift+Delete"; onActivated: root.deleteSelected() }
@@ -2167,6 +2611,8 @@ Window {
 
     Shortcut { sequence: "Ctrl+1"; onActivated: root.setViewMode("list") }
     Shortcut { sequence: "Ctrl+2"; onActivated: root.setViewMode("icon") }
+    Shortcut { sequence: "Ctrl+3"; onActivated: root.setViewMode("columns") }
+    Shortcut { sequence: "Ctrl+4"; onActivated: root.setViewMode("gallery") }
     Shortcut { sequence: "Ctrl++"; onActivated: if (root.currentTab) root.currentTab.zoomIn() }
     Shortcut { sequence: "Ctrl+="; onActivated: if (root.currentTab) root.currentTab.zoomIn() }
     Shortcut { sequence: "Ctrl+-"; onActivated: if (root.currentTab) root.currentTab.zoomOut() }

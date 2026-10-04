@@ -9,6 +9,8 @@
 #include <QFileInfo>
 #include <QLocale>
 #include <QProcess>
+#include <QFont>
+#include <QTextLayout>
 #include <QStandardPaths>
 #include <QUrl>
 #include <QVariantList>
@@ -121,6 +123,77 @@ QString Platform::formatSize(qint64 bytes) const
     const QString result = QString::fromUtf8(formatted);
     g_free(formatted);
     return result;
+}
+
+namespace {
+
+// Lines `text` takes when wrapped like the labels (word boundary, else
+// anywhere) into `width`.
+int wrappedLines(const QString &text, const QFont &font, qreal width)
+{
+    QTextLayout layout(text, font);
+    QTextOption option;
+    option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    layout.setTextOption(option);
+    layout.beginLayout();
+    int count = 0;
+    while (true) {
+        QTextLine line = layout.createLine();
+        if (!line.isValid())
+            break;
+        line.setLineWidth(width);
+        ++count;
+    }
+    layout.endLayout();
+    return count;
+}
+
+} // namespace
+
+QString Platform::elideMiddle(const QString &text, int pixelSize, qreal width, int lines,
+                              bool bold) const
+{
+    if (text.isEmpty() || width <= 0 || lines <= 0)
+        return text;
+    QFont font = QGuiApplication::font();
+    font.setPixelSize(pixelSize);
+    font.setBold(bold);
+    if (wrappedLines(text, font, width) <= lines)
+        return text;
+
+    // The most characters that still fit, split evenly around the ellipsis
+    // (the odd one goes to the end, which carries the extension).
+    const QChar ellipsis(0x2026);
+    const auto candidate = [&](qsizetype keep) {
+        const qsizetype tail = (keep + 1) / 2;
+        return text.left(keep - tail) + ellipsis + text.right(tail);
+    };
+    qsizetype low = 0;
+    qsizetype high = text.size() - 1;
+    while (low < high) {
+        const qsizetype mid = (low + high + 1) / 2;
+        if (wrappedLines(candidate(mid), font, width) <= lines)
+            low = mid;
+        else
+            high = mid - 1;
+    }
+    return candidate(low);
+}
+
+qint64 Platform::freeSpace(const QString &path) const
+{
+    if (path.isEmpty() || !Location::isLocal(path))
+        return -1;
+    GFile *file = Location::make(path);
+    GFileInfo *info = g_file_query_filesystem_info(file, G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
+                                                   nullptr, nullptr);
+    g_object_unref(file);
+    if (!info)
+        return -1;
+    const qint64 free = g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE)
+        ? qint64(g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE)) : -1;
+    g_object_unref(info);
+    return free;
 }
 
 QString Platform::formatItemCount(int count) const

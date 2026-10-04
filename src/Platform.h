@@ -70,7 +70,16 @@ public:
 
     // Human-readable size using GLib's formatter, so omanta and every GTK
     // app on the system agree on what "1.2 MB" means.
+    // A name too long for `lines` wrapped lines of `width` px at `pixelSize`
+    // (the app font), shortened Finder-style: the start, "…", the end — so
+    // "holiday photo 2026 (copy).jpg" keeps its tail. Unchanged when it fits.
+    // For wrapped labels; single-line Text uses Text.ElideMiddle directly.
+    Q_INVOKABLE QString elideMiddle(const QString &text, int pixelSize, qreal width,
+                                    int lines, bool bold = false) const;
     Q_INVOKABLE QString formatSize(qint64 bytes) const;
+    // Free bytes on the filesystem holding a local `path`, or -1 (remote
+    // locations are never asked synchronously — the network could stall).
+    Q_INVOKABLE qint64 freeSpace(const QString &path) const;
     // "1 item" / "12 items", "—" for a count of -1 (unknown).
     Q_INVOKABLE QString formatItemCount(int count) const;
     // format: "simple" (Nautilus's relative style — "Today, 12:33", "3 days

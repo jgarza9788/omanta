@@ -1,4 +1,5 @@
 #include "SearchModel.h"
+#include "FileSortFilterModel.h"
 #include "DirectoryModel.h"
 #include "Location.h"
 
@@ -200,6 +201,17 @@ void SearchModel::setTypeFilter(const QString &filter)
         restart();
 }
 
+void SearchModel::setMatchMode(const QString &mode)
+{
+    const QString clean = mode == QLatin1String("regex") ? mode : QStringLiteral("auto");
+    if (m_matchMode == clean)
+        return;
+    m_matchMode = clean;
+    Q_EMIT matchModeChanged();
+    if (!m_query.isEmpty() && !m_root.isEmpty() && !m_contentMode)
+        restart();
+}
+
 QStringList SearchModel::typeFilters()
 {
     // Nautilus's search-popover categories, in its menu order.
@@ -352,6 +364,20 @@ void SearchModel::restart()
 
     if (m_contentMode) {
         startContentSearch();
+        return;
+    }
+
+    // Compiled once per search, not per entry. A half-typed regex is an
+    // ordinary state while typing: say what is wrong, search for nothing.
+    QString patternError;
+    m_pattern = FileSortFilterModel::namePattern(m_query, m_matchMode, &patternError);
+    if (m_pattern.pattern().isEmpty()) { // a bare "re:" — nothing to look for yet
+        setSearching(false);
+        return;
+    }
+    if (!patternError.isEmpty()) {
+        setUnavailable(patternError);
+        setSearching(false);
         return;
     }
 
@@ -731,7 +757,7 @@ void SearchModel::consume(GList *infos, const QString &relPrefix)
             m_queue.append({ child, relPath + QLatin1Char('/') });
         }
 
-        if (entry.displayName.toCaseFolded().contains(m_needle) && acceptsEntry(entry))
+        if (m_pattern.match(entry.displayName).hasMatch() && acceptsEntry(entry))
             matched.append({ std::move(entry), relPath });
     }
 

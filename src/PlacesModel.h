@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QList>
 #include <QString>
 #include <QTimer>
+#include <QVariantMap>
 #include <QtQmlIntegration>
 
 #include <gio/gio.h>
@@ -38,6 +40,10 @@ public:
         SectionRole,    // "Places" | "Devices" | "Bookmarks" | "Network"
         MountableRole,  // a volume that needs mounting before it has a location
         EjectableRole,
+        // Filesystem usage for Home and mounted devices, -1 while unknown
+        // (not measured yet, or not a row that gets a bar).
+        FreeBytesRole,
+        TotalBytesRole,
     };
     Q_ENUM(Roles)
 
@@ -64,6 +70,14 @@ public:
     // The row currently showing `location`, or -1 — for highlighting the
     // sidebar entry matching the tab.
     Q_INVOKABLE int rowForLocation(const QString &location) const;
+
+    // One row's fields by index — {name, location, section, mountable} — for
+    // keyboard activation, where there is no delegate to read them from.
+    Q_INVOKABLE QVariantMap get(int row) const;
+
+    // Re-measure free space now (also runs every 30 s and after devices
+    // change). Asynchronous: rows update through dataChanged.
+    Q_INVOKABLE void refreshSpace();
 
     // Bookmark writes go to the same GTK bookmarks file the section reads, so
     // Nautilus and the file chooser see the change too — and the file watch
@@ -125,4 +139,15 @@ private:
     QFileSystemWatcher *m_bookmarksWatcher = nullptr;
     QTimer m_devicesSettle;
     QTimer m_bookmarksSettle;
+
+    struct Space {
+        qint64 free = -1;
+        qint64 total = -1;
+    };
+    static bool measuresSpace(const Place &place);
+    static void onSpaceReady(GObject *source, GAsyncResult *res, gpointer data);
+    void applySpace(const QString &location, Space space);
+    QHash<QString, Space> m_space; // by location
+    QTimer m_spaceTimer;
+    GCancellable *m_spaceCancellable = nullptr;
 };

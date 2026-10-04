@@ -526,6 +526,50 @@ bool extract(const QString &archivePath, const QString &destinationDir, QString 
     return true;
 }
 
+bool list(const QString &archivePath, int limit, QList<ListedEntry> *entries,
+          bool *truncated, qint64 *totalBytes, QString *error)
+{
+    *truncated = false;
+    *totalBytes = 0;
+    struct archive *reader = archive_read_new();
+    archive_read_support_format_all(reader);
+    archive_read_support_filter_all(reader);
+    if (archive_read_open_filename(reader, QFile::encodeName(archivePath).constData(), 64 * 1024)
+        != ARCHIVE_OK) {
+        *error = archiveError(reader, "Could not open the archive");
+        archive_read_free(reader);
+        return false;
+    }
+    bool ok = true;
+    while (true) {
+        struct archive_entry *entry = nullptr;
+        const int status = archive_read_next_header(reader, &entry);
+        if (status == ARCHIVE_EOF)
+            break;
+        if (status < ARCHIVE_WARN) {
+            *error = archiveError(reader, "Could not read the archive");
+            ok = !entries->isEmpty(); // a partial listing still says something
+            break;
+        }
+        if (entries->size() >= limit) {
+            *truncated = true;
+            break;
+        }
+        const char *raw = archive_entry_pathname_utf8(entry);
+        if (!raw)
+            raw = archive_entry_pathname(entry);
+        ListedEntry listed;
+        listed.path = QString::fromUtf8(raw ? raw : "");
+        listed.directory = archive_entry_filetype(entry) == AE_IFDIR;
+        listed.size = archive_entry_size_is_set(entry) ? archive_entry_size(entry) : 0;
+        *totalBytes += listed.size;
+        entries->append(listed);
+        archive_read_data_skip(reader);
+    }
+    archive_read_free(reader);
+    return ok;
+}
+
 bool undoExtraction(const QList<CreatedEntry> &created, QString *error, const Cancelled &cancelled)
 {
     QSet<QString> owned;

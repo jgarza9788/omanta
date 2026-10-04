@@ -28,6 +28,9 @@ private Q_SLOTS:
     void ownerSortFallsBackToName();
     void tieBreaksOnName();
     void nameFilterMatchesSubstrings();
+    void nameFilterTakesGlobsAndRegexes();
+    void namesMatchingSelectsByPattern();
+    void namePatternRules();
     void foldersOnlyHidesFiles();
     void proxyRowForNameRoundTrips();
     void findByPrefixWrapsAround();
@@ -372,6 +375,78 @@ void TestSortFilter::nameFilterMatchesSubstrings()
 
     proxy.setNameFilter(QString());
     QCOMPARE(proxy.rowCount(), 3);
+}
+
+void TestSortFilter::nameFilterTakesGlobsAndRegexes()
+{
+    TempTree tree;
+    tree.writeFile("IMG_0001.jpg");
+    tree.writeFile("IMG_0002.png");
+    tree.writeFile("notes.txt");
+
+    DirectoryModel model;
+    FileSortFilterModel proxy;
+    proxy.setSourceModel(&model);
+    model.setPath(tree.path());
+    QTRY_COMPARE(proxy.rowCount(), 3);
+
+    proxy.setNameFilter(QStringLiteral("*.jpg"));
+    QCOMPARE(visible(proxy), (QStringList{ "IMG_0001.jpg" }));
+
+    proxy.setNameFilter(QStringLiteral("re:^img_\\d+"));
+    QCOMPARE(proxy.rowCount(), 2);
+
+    proxy.setNameFilterMode(QStringLiteral("regex"));
+    proxy.setNameFilter(QStringLiteral("\\.(txt|png)$"));
+    QCOMPARE(visible(proxy), (QStringList{ "IMG_0002.png", "notes.txt" }));
+
+    // Half-typed: nothing shows, and the reason is published.
+    proxy.setNameFilter(QStringLiteral("(txt"));
+    QCOMPARE(proxy.rowCount(), 0);
+    QVERIFY(!proxy.nameFilterError().isEmpty());
+
+    proxy.setNameFilter(QString());
+    QCOMPARE(proxy.rowCount(), 3);
+    QVERIFY(proxy.nameFilterError().isEmpty());
+}
+
+void TestSortFilter::namesMatchingSelectsByPattern()
+{
+    TempTree tree;
+    tree.writeFile("a.jpg");
+    tree.writeFile("b.JPG");
+    tree.writeFile("c.png");
+
+    DirectoryModel model;
+    FileSortFilterModel proxy;
+    proxy.setSourceModel(&model);
+    model.setPath(tree.path());
+    QTRY_COMPARE(proxy.rowCount(), 3);
+
+    QCOMPARE(proxy.namesMatching(QStringLiteral("*.jpg"), QStringLiteral("auto")),
+             (QStringList{ "a.jpg", "b.JPG" }));
+    QVERIFY(proxy.namesMatching(QStringLiteral("re:("), QStringLiteral("auto")).isEmpty());
+    QVERIFY(!FileSortFilterModel::patternError(QStringLiteral("re:("), QStringLiteral("auto")).isEmpty());
+}
+
+void TestSortFilter::namePatternRules()
+{
+    const auto matches = [](const QString &pattern, const QString &name,
+                            const QString &mode = QStringLiteral("auto")) {
+        return FileSortFilterModel::namePattern(pattern, mode).match(name).hasMatch();
+    };
+    // Plain text keeps the old behaviour: substring, any case, and regex
+    // characters are just characters.
+    QVERIFY(matches(QStringLiteral("report"), QStringLiteral("Annual-REPORT.pdf")));
+    QVERIFY(matches(QStringLiteral("a+b (1)"), QStringLiteral("a+b (1).txt")));
+    QVERIFY(!matches(QStringLiteral("a+b (1)"), QStringLiteral("aab 1.txt")));
+    // A glob covers the whole name.
+    QVERIFY(matches(QStringLiteral("IMG_????.png"), QStringLiteral("img_0042.png")));
+    QVERIFY(!matches(QStringLiteral("IMG_????.png"), QStringLiteral("old-IMG_0042.png")));
+    // Regexes are smart-case.
+    QVERIFY(matches(QStringLiteral("re:draft"), QStringLiteral("DRAFT.txt")));
+    QVERIFY(!matches(QStringLiteral("re:Draft"), QStringLiteral("draft.txt")));
+    QVERIFY(matches(QStringLiteral("\\.mkv$"), QStringLiteral("clip.mkv"), QStringLiteral("regex")));
 }
 
 void TestSortFilter::foldersOnlyHidesFiles()

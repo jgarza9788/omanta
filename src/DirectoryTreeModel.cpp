@@ -442,3 +442,17 @@ int DirectoryTreeModel::findByPrefix(const QString &prefix, int startRow) const
     }
     return -1;
 }
+
+QStringList DirectoryTreeModel::namesMatching(const QString &pattern, const QString &mode) const
+{
+    QString error;
+    const QRegularExpression compiled = FileSortFilterModel::namePattern(pattern, mode, &error);
+    QStringList names;
+    if (compiled.pattern().isEmpty() || !error.isEmpty())
+        return names;
+    for (int row = 0; row < int(m_flat.size()); ++row) {
+        if (compiled.match(data(index(row), DirectoryModel::DisplayNameRole).toString()).hasMatch())
+            names.append(data(index(row), DirectoryModel::NameRole).toString());
+    }
+    return names;
+}

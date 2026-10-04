@@ -46,6 +46,9 @@ public:
     Q_INVOKABLE void clear();
     // Plain text (Copy Location) — nothing to do with the file payload above.
     Q_INVOKABLE void copyText(const QString &text);
+    // The clipboard's plain text, capped at 4 KB — enough for any checksum
+    // line to compare against, not a channel for megabytes of paste.
+    Q_INVOKABLE QString text() const;
 
 Q_SIGNALS:
     void changed();

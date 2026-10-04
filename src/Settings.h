@@ -68,6 +68,19 @@ class Settings : public QObject
     // Nautilus keeps its zoom levels as global settings too.
     Q_PROPERTY(int iconZoom READ iconZoom WRITE setIconZoom NOTIFY changed)
     Q_PROPERTY(int listZoom READ listZoom WRITE setListZoom NOTIFY changed)
+    // Keyboard: "vim" (hjkl, g/G, / filter — the Omarchy-plugin keys) or
+    // "classic" (Nautilus type-ahead). Ctrl/Alt/F-key shortcuts work in both.
+    Q_PROPERTY(QString keyboardMode READ keyboardMode WRITE setKeyboardMode NOTIFY changed)
+    // Space: omanta's own quick view ("builtin") or Sushi over D-Bus.
+    Q_PROPERTY(QString previewer READ previewer WRITE setPreviewer NOTIFY changed)
+    // Reopen the last windows and tabs on a plain launch.
+    Q_PROPERTY(bool restoreSession READ restoreSession WRITE setRestoreSession NOTIFY changed)
+    // Spring-loaded folders: seconds a drag rests on a folder before it
+    // opens ("3" | "1.5" | "0.75" | "off").
+    Q_PROPERTY(QString springLoadDelay READ springLoadDelay WRITE setSpringLoadDelay NOTIFY changed)
+    // The right-hand info panel (F11).
+    Q_PROPERTY(bool showInfoPanel READ showInfoPanel WRITE setShowInfoPanel NOTIFY changed)
+
     // Bookkeeping, not a preference: the Toggle-menu row is added on first
     // launch only, so removing it sticks.
     Q_PROPERTY(bool toggleMenuOffered READ toggleMenuOffered WRITE setToggleMenuOffered NOTIFY changed)
@@ -84,7 +97,7 @@ public:
     QString showThumbnails() const { return choiceFor("showThumbnails", {"local-only", "never", "always"}); }
     QString showDirectoryItemCounts() const { return choiceFor("showDirectoryItemCounts", {"local-only", "never", "always"}); }
     QString dateTimeFormat() const { return choiceFor("dateTimeFormat", {"simple", "detailed"}); }
-    QString defaultViewMode() const { return choiceFor("defaultViewMode", {"icon", "list"}); }
+    QString defaultViewMode() const { return choiceFor("defaultViewMode", {"icon", "list", "columns", "gallery"}); }
     bool showHiddenFiles() const { return boolFor("showHiddenFiles", false); }
     bool showSidebar() const { return boolFor("showSidebar", true); }
     QStringList listColumnOrder() const;
@@ -92,6 +105,16 @@ public:
     QStringList iconCaptions() const;
     qreal backgroundOpacity() const { return realFor("backgroundOpacity", 1.0, 0.5, 1.0); }
     bool toggleMenuOffered() const { return boolFor("toggleMenuOffered", false); }
+    QString keyboardMode() const { return choiceFor("keyboardMode", {"vim", "classic"}); }
+    QString previewer() const { return choiceFor("previewer", {"builtin", "sushi"}); }
+    bool restoreSession() const { return boolFor("restoreSession", true); }
+    bool showInfoPanel() const { return boolFor("showInfoPanel", false); }
+    QString springLoadDelay() const { return choiceFor("springLoadDelay", {"3", "1.5", "0.75", "off"}); }
+    // Bookkeeping: the windows/tabs to restore, as one JSON line. Not a
+    // property — nothing binds to it, and writing it must not re-evaluate
+    // every Settings binding in every window.
+    Q_INVOKABLE QString sessionState() const { return m_values.value(QStringLiteral("sessionState")); }
+    Q_INVOKABLE void setSessionState(const QString &json);
     int iconZoom() const { return qRound(realFor("iconZoom", 64, 32, 128)); }
     int listZoom() const { return qRound(realFor("listZoom", 18, 16, 64)); }
 
@@ -117,6 +140,11 @@ public:
     void setIconCaptions(const QStringList &value) { set("iconCaptions", value.join(QLatin1Char(','))); }
     void setBackgroundOpacity(qreal value) { set("backgroundOpacity", QString::number(value, 'f', 2)); }
     void setToggleMenuOffered(bool value) { set("toggleMenuOffered", value ? "true" : "false"); }
+    void setKeyboardMode(const QString &value) { set("keyboardMode", value); }
+    void setPreviewer(const QString &value) { set("previewer", value); }
+    void setRestoreSession(bool value) { set("restoreSession", value ? "true" : "false"); }
+    void setShowInfoPanel(bool value) { set("showInfoPanel", value ? "true" : "false"); }
+    void setSpringLoadDelay(const QString &value) { set("springLoadDelay", value); }
     void setIconZoom(int value) { set("iconZoom", QString::number(value)); }
     void setListZoom(int value) { set("listZoom", QString::number(value)); }
 

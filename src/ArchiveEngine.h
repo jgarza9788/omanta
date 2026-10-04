@@ -48,6 +48,18 @@ bool undoExtraction(const QList<CreatedEntry> &created, QString *error,
 // Where the archive extension starts in `name` (compound-aware: ".tar.gz" is
 // one unit), or -1. Used for the landing folder's name and by the UI to
 // suggest archive names.
+// The quick view's look inside: entry names and sizes from the headers
+// alone — nothing is written anywhere. Stops after `limit` entries
+// (*truncated says so); *total counts what was listed. Encrypted headers and
+// damaged archives answer false with *error.
+struct ListedEntry {
+    QString path;
+    qint64 size = 0;
+    bool directory = false;
+};
+bool list(const QString &archivePath, int limit, QList<ListedEntry> *entries,
+          bool *truncated, qint64 *totalBytes, QString *error);
+
 int archiveExtensionOffset(const QString &name);
 
 // Content types "Extract Here" is offered for — what libarchive here can

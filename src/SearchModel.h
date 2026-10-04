@@ -10,6 +10,8 @@
 #include <gio/gio.h>
 #include <tinysparql.h>
 
+#include <QRegularExpression>
+
 #include "FileEntry.h"
 
 // Recursive filename search under one location. Feeds the same
@@ -57,6 +59,11 @@ class SearchModel : public QAbstractListModel
     Q_PROPERTY(QString dateKind READ dateKind WRITE setDateKind NOTIFY dateKindChanged)
     Q_PROPERTY(QString dateRange READ dateRange WRITE setDateRange NOTIFY dateRangeChanged)
     Q_PROPERTY(QString typeFilter READ typeFilter WRITE setTypeFilter NOTIFY typeFilterChanged)
+    // How the filename walk reads the query (FileSortFilterModel::namePattern): "auto" is
+    // plain text, a glob when it holds wildcards, a regex after `re:`;
+    // "regex" takes the whole query as a regular expression. Full-text
+    // (content) mode ignores it — the index matches words, not patterns.
+    Q_PROPERTY(QString matchMode READ matchMode WRITE setMatchMode NOTIFY matchModeChanged)
 
 public:
     explicit SearchModel(QObject *parent = nullptr);
@@ -80,6 +87,8 @@ public:
     void setDateRange(const QString &range);
     QString typeFilter() const { return m_typeFilter; }
     void setTypeFilter(const QString &filter);
+    QString matchMode() const { return m_matchMode; }
+    void setMatchMode(const QString &mode);
 
     // The category ids in menu order — the QML layer owns the labels.
     Q_INVOKABLE static QStringList typeFilters();
@@ -100,6 +109,7 @@ Q_SIGNALS:
     void dateKindChanged();
     void dateRangeChanged();
     void typeFilterChanged();
+    void matchModeChanged();
     void searchingChanged();
     void countChanged();
     void cappedChanged();
@@ -167,6 +177,8 @@ private:
     QString m_dateKind = QStringLiteral("modified");
     QString m_dateRange = QStringLiteral("any");
     QString m_typeFilter = QStringLiteral("any");
+    QString m_matchMode = QStringLiteral("auto");
+    QRegularExpression m_pattern; // compiled once per search
     bool m_descend = true; // computed per search from m_recursion + the root
     QString m_unavailableReason;
     TrackerSparqlConnection *m_sparql = nullptr;

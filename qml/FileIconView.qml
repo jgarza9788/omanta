@@ -55,12 +55,10 @@ Item {
 
     // Empty space accepts drops into the folder being viewed. Behind the
     // grid, so folder cells' own DropAreas win where they overlap.
-    DropArea {
+    FileDropArea {
         anchors.fill: parent
-        onDropped: drop => {
-            root.tab.requestDrop(drop.urls, root.tab.path);
-            drop.accept();
-        }
+        destination: root.tab.path
+        onFilesDropped: urls => root.tab.requestDrop(urls, root.tab.path)
     }
 
     GridView {
@@ -179,12 +177,17 @@ Item {
                     textFormat: Text.PlainText
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
-                    text: cell.displayName
+                    // Two lines, Finder-style: a name too long for them
+                    // keeps its start and its end around an ellipsis, so the
+                    // extension and a "(copy)" stay visible. ElideRight below
+                    // is only a backstop should the font measure differently.
+                    readonly property bool shortened: text !== cell.displayName || truncated
+                    text: Platform.elideMiddle(cell.displayName, font.pixelSize, width, 2)
                     color: root.tab.isSelected(cell.name) ? Colors.selectionText : Colors.text
                     font.pixelSize: 12
                     elide: Text.ElideRight
                     maximumLineCount: 2
-                    wrapMode: Text.Wrap
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     opacity: fullName.visible ? 0 : 1
                 }
 
@@ -216,7 +219,7 @@ Item {
                 id: fullName
 
                 objectName: "fullName"
-                visible: label.truncated && root.tab.selectionCount === 1
+                visible: label.shortened && root.tab.selectionCount === 1
                          && root.tab.isSelected(cell.name)
                 x: body.x + label.x - 3
                 y: body.y + label.y - 2
@@ -241,15 +244,15 @@ Item {
                 }
             }
 
-            DropArea {
+            FileDropArea {
                 id: cellDrop
 
                 anchors.fill: parent
                 enabled: cell.isDir
-                onDropped: drop => {
-                    root.tab.requestDrop(drop.urls, cell.filePath);
-                    drop.accept();
-                }
+                destination: cell.filePath
+                springLoaded: true
+                onFilesDropped: urls => root.tab.requestDrop(urls, cell.filePath)
+                onSprung: root.tab.navigate(cell.filePath)
             }
 
             Rectangle {

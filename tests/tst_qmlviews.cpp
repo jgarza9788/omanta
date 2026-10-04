@@ -13,8 +13,13 @@
 #include "TestFixture.h"
 
 #include <QDBusConnection>
+#include <QDataStream>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QDBusMessage>
 #include <QGuiApplication>
+#include <QJSValue>
+#include <QMimeData>
 #include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
@@ -26,6 +31,7 @@
 #include <QStandardPaths>
 #include <QStyleHints>
 #include <QTest>
+#include <QTimer>
 
 #include <algorithm>
 #include <functional>
@@ -97,6 +103,16 @@ private Q_SLOTS:
     void spacePreviewsInSushi();
     void tabCloseButtonClosesTab();
     void tabTitlesFollowNavigation();
+    void vimKeysFilterAndQuickView();
+    void quickViewOptionalKinds();
+    void sessionRoundTrip();
+    void splitPaneTransfers();
+    void longNamesKeepTheirEnds();
+    void newTabTakesTheKeys();
+    void shortcutsSearch();
+    void columnsAndGalleryViews();
+    void dragLabelAndSpringLoadedFolders();
+    void dragGestureStartsADrag();
 
 private:
     QTemporaryDir m_cache;
@@ -270,10 +286,12 @@ static void checkDragPreviews(QQuickWindow *window, QQuickItem *tab,
             QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, point, pressDelay);
             QTRY_VERIFY(drag->property("ready").toBool());
             QCOMPARE(drag->property("itemCount").toInt(), multiple ? names.size() : 1);
-            const auto data = drag->property("mimeData").value<QJSValue>().toVariant().toMap();
-            Platform platform;
+            // What DragSource will carry once the gesture becomes a drag.
+            QVariant carried = drag->property("paths");
+            if (carried.canConvert<QJSValue>())
+                carried = carried.value<QJSValue>().toVariant();
             const QStringList paths = invoke(tab, "selectedPaths").toStringList();
-            QCOMPARE(data.value("text/uri-list").toString(), platform.uriList(paths));
+            QCOMPARE(carried.toStringList(), paths);
             QCOMPARE(paths.size(), multiple ? names.size() : 1);
 
             auto *grab = qobject_cast<QQuickItemGrabResult *>(
@@ -1218,6 +1236,12 @@ void TestQmlViews::spacePreviewsInSushi()
                            "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
         qputenv(env, config.filePath(env).toUtf8());
     qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    // This is the Sushi path and the classic type-ahead keys, both opt-in now.
+    {
+        QFile settings(config.filePath("OMANTA_SETTINGS_FILE"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("previewer=sushi\nkeyboardMode=classic\n");
+    }
     const QString first = tree.writeFile("alpha.txt");
     const QString second = tree.writeFile("beta notes.md");
     QVERIFY(QDir().mkpath(tree.filePath("folder")));
@@ -1481,6 +1505,806 @@ void TestQmlViews::tabTitlesFollowNavigation()
     go("two");
     openTab("one");
     QTRY_COMPARE(tabStripLabels(window->contentItem()), (QStringList{"two", "one"}));
+}
+
+// The keyboard-first layer end to end: vim movement, the `/` filter with a
+// regex, the built-in quick view following j/k, the info panel toggle, and
+// classic mode handing letters back to type-ahead.
+void TestQmlViews::vimKeysFilterAndQuickView()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|qml:.*Error|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    QVERIFY(QDir().mkpath(tree.filePath("folder")));
+    tree.writeFile("alpha.txt");
+    tree.writeFile("beta.md");
+    tree.writeFile("gamma.log");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QVERIFY(tab);
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+    window->requestActivate();
+    tab->forceActiveFocus();
+    QTRY_VERIFY(tab->hasActiveFocus());
+    auto *settings = engine.singletonInstance<Settings *>("Omanta", "Settings");
+    QVERIFY(settings);
+    QCOMPARE(settings->keyboardMode(), QStringLiteral("vim"));
+    const auto name = [&] { return window->property("currentName").toString(); };
+    const auto type = [&](const QString &text) {
+        for (const QChar c : text)
+            QTest::keyClick(window, c.toLatin1());
+    };
+
+    // List view (in the grid, j/k move by whole rows). Folders first, then
+    // names: folder, alpha.txt, beta.md, gamma.log.
+    QTest::keyClick(window, Qt::Key_1, Qt::ControlModifier);
+    QTRY_COMPARE(window->property("viewMode").toString(), QStringLiteral("list"));
+    tab->forceActiveFocus();
+    QTest::keyClick(window, 'j');
+    QTRY_COMPARE(name(), QStringLiteral("folder"));
+    QTest::keyClick(window, 'j');
+    QCOMPARE(name(), QStringLiteral("alpha.txt"));
+    QTest::keyClick(window, 'G');
+    QCOMPARE(name(), QStringLiteral("gamma.log"));
+    QTest::keyClick(window, 'k');
+    QCOMPARE(name(), QStringLiteral("beta.md"));
+    QTest::keyClick(window, 'g');
+    QCOMPARE(name(), QStringLiteral("folder"));
+    // A letter is a command now, not type-ahead: `b` must not jump to beta.
+    QCOMPARE(tab->property("selectionCount").toInt(), 1);
+
+    // `/` filters as you type; a regex after re:; Enter keeps it.
+    QTest::keyClick(window, '/');
+    QTRY_VERIFY(tab->property("filterEditing").toBool());
+    type(QStringLiteral("re:^(a|g)"));
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(!tab->property("filterEditing").toBool());
+    QVERIFY(tab->hasActiveFocus());
+    QCOMPARE(window->property("visibleCount").toInt(), 2);
+    QCOMPARE(name(), QStringLiteral("alpha.txt"));
+    // A broken pattern says so on the status line and hides everything.
+    QTest::keyClick(window, '/');
+    QTRY_VERIFY(tab->property("filterEditing").toBool());
+    type(QStringLiteral("re:(")); // reopening selects the old text: this replaces it
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 0);
+    QVERIFY(tab->property("statusText").toString().startsWith(QStringLiteral("Invalid pattern")));
+    // Esc in the field clears the filter.
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+    QCOMPARE(tab->property("filterText").toString(), QString());
+
+    // Space: the built-in quick view, no previewer process; j steps on.
+    QTest::keyClick(window, 'G');
+    QCOMPARE(name(), QStringLiteral("gamma.log"));
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    QCOMPARE(window->property("quickViewPath").toString(), tree.filePath("gamma.log"));
+    QTest::keyClick(window, 'k');
+    QTRY_COMPARE(window->property("quickViewPath").toString(), tree.filePath("beta.md"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!window->property("quickViewOpen").toBool());
+    QTRY_VERIFY(tab->hasActiveFocus());
+    // Picture-in-picture: p shrinks the preview to a corner and hands the
+    // keys to the files; the card follows j/k; Esc closes it first.
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    QTest::keyClick(window, 'p');
+    QTRY_VERIFY(window->property("quickViewPip").toBool());
+    QTRY_VERIFY(tab->hasActiveFocus());
+    QTest::keyClick(window, 'j');
+    QTRY_COMPARE(window->property("quickViewPath").toString(), tree.filePath("gamma.log"));
+    QCOMPARE(name(), QStringLiteral("gamma.log"));
+    QTest::keyClick(window, 'P'); // vim P from the files: full size again
+    QTRY_VERIFY(!window->property("quickViewPip").toBool());
+    QTest::keyClick(window, 'p');
+    QTRY_VERIFY(window->property("quickViewPip").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!window->property("quickViewOpen").toBool());
+    QCOMPARE(tab->property("selectionCount").toInt(), 1); // that Esc was the card's
+
+    // Esc with the preview gone clears the selection, one layer at a time.
+    QTest::keyClick(window, Qt::Key_Escape);
+    QCOMPARE(tab->property("selectionCount").toInt(), 0);
+
+    // The folder kind: a listing plus a background size count.
+    QTest::keyClick(window, 'g');
+    QCOMPARE(name(), QStringLiteral("folder"));
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    QTest::qWait(200);
+    QTest::keyClick(window, Qt::Key_Space); // Space closes too
+    QTRY_VERIFY(!window->property("quickViewOpen").toBool());
+
+    // `i` toggles the info panel (remembered in Settings), which follows
+    // the current item.
+    QTest::keyClick(window, 'i');
+    QTRY_VERIFY(settings->showInfoPanel());
+    QTest::keyClick(window, 'j');
+    QTest::qWait(200);
+    QTest::keyClick(window, 'i');
+    QTRY_VERIFY(!settings->showInfoPanel());
+
+    // `.` shows hidden files; `s` cycles the sort.
+    QTest::keyClick(window, '.');
+    QTRY_VERIFY(window->property("showHidden").toBool());
+    QTest::keyClick(window, '.');
+    QTRY_VERIFY(!window->property("showHidden").toBool());
+    QTest::keyClick(window, 's');
+    QCOMPARE(window->property("sortKey").toInt(), 3); // ByModified
+    QVERIFY(window->property("sortDescending").toBool());
+
+    // Classic keys: letters are type-ahead again.
+    settings->setKeyboardMode(QStringLiteral("classic"));
+    QTest::keyClick(window, 'b');
+    QTRY_COMPARE(name(), QStringLiteral("beta.md"));
+}
+
+// The optional renderers (Qt Pdf, Qt Multimedia) load and draw without QML
+// errors, and Esc still closes the preview from inside the player.
+void TestQmlViews::quickViewOptionalKinds()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    {
+        QPdfWriter pdf(tree.filePath("a-doc.pdf"));
+        QPainter painter(&pdf);
+        painter.drawText(100, 100, QStringLiteral("omanta"));
+    }
+    {
+        // 0.2 s of 8-bit mono silence: the smallest valid WAV.
+        QFile wav(tree.filePath("b-sound.wav"));
+        QVERIFY(wav.open(QIODevice::WriteOnly));
+        const QByteArray samples(1600, char(0x80));
+        QDataStream out(&wav);
+        out.setByteOrder(QDataStream::LittleEndian);
+        wav.write("RIFF");
+        out << quint32(36 + samples.size());
+        wav.write("WAVEfmt ");
+        out << quint32(16) << quint16(1) << quint16(1) << quint32(8000) << quint32(8000)
+            << quint16(1) << quint16(8);
+        wav.write("data");
+        out << quint32(samples.size());
+        wav.write(samples);
+    }
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+    window->requestActivate();
+    QTest::keyClick(window, Qt::Key_1, Qt::ControlModifier);
+    tab->forceActiveFocus();
+    QTRY_VERIFY(tab->hasActiveFocus());
+
+    QTest::keyClick(window, 'g');
+    QCOMPARE(window->property("currentName").toString(), QStringLiteral("a-doc.pdf"));
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    QTest::qWait(500);
+    QTest::keyClick(window, 'j'); // on to the sound, inside the preview
+    QTRY_COMPARE(window->property("quickViewPath").toString(), tree.filePath("b-sound.wav"));
+    QTest::qWait(500);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!window->property("quickViewOpen").toBool());
+}
+
+// Session restore: what a window saves (tabs, split panes, the current tab)
+// comes back as it was, and a folder deleted in between is dropped rather
+// than restored as an error page.
+void TestQmlViews::sessionRoundTrip()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    for (const char *folder : {"one", "two", "three", "gone"})
+        QVERIFY(QDir().mkpath(tree.filePath(folder)));
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    const auto windows = [&] {
+        QList<QQuickWindow *> found;
+        for (QObject *child : application.children()) {
+            if (auto *window = qobject_cast<QQuickWindow *>(child); window && child->property("currentTab").isValid())
+                found.append(window);
+        }
+        return found;
+    };
+
+    application.openWindow(tree.filePath("one"));
+    QTRY_COMPARE(windows().size(), 1);
+    QQuickWindow *window = windows().first();
+    QVERIFY(QMetaObject::invokeMethod(window, "addTab", Q_ARG(QVariant, tree.filePath("two")),
+                                      Q_ARG(QVariant, QVariant())));
+    QTRY_COMPARE(window->property("tabCount").toInt(), 2);
+    // Split the second tab; its other pane goes to "three".
+    auto *slot = window->property("currentSlot").value<QObject *>();
+    QVERIFY(QMetaObject::invokeMethod(slot, "restoreSplit", Q_ARG(QVariant, tree.filePath("three")),
+                                      Q_ARG(QVariant, 0)));
+    QTRY_VERIFY(window->property("splitOpen").toBool());
+    QVERIFY(QMetaObject::invokeMethod(window, "addTab", Q_ARG(QVariant, tree.filePath("gone")),
+                                      Q_ARG(QVariant, QVariant())));
+    QTRY_COMPARE(window->property("tabCount").toInt(), 3);
+    QVERIFY(QMetaObject::invokeMethod(window, "cycleTab", Q_ARG(QVariant, 2))); // back to "two"
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("two"));
+
+    const QString json = application.sessionJson();
+    QVERIFY(json.contains(QStringLiteral("three")));
+    QVERIFY(!json.contains(QLatin1Char('\n')));
+
+    window->close();
+    QTRY_COMPARE(windows().size(), 0);
+    QVERIFY(QDir(tree.filePath("gone")).removeRecursively());
+
+    QVERIFY(application.restoreSession(json));
+    QTRY_COMPARE(windows().size(), 1);
+    window = windows().first();
+    QTRY_COMPARE(window->property("tabCount").toInt(), 2); // "gone" dropped
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("two"));
+    QTRY_VERIFY(window->property("splitOpen").toBool());
+
+    // Nothing usable: nothing opens, and the caller falls back to a window.
+    QVERIFY(!application.restoreSession(QStringLiteral("[{\"tabs\":[{\"path\":\"/no/such/dir\"}]}]")));
+    QVERIFY(!application.restoreSession(QStringLiteral("not json")));
+}
+
+// Split view's F5 / F6: the selection copies / moves into the other pane's
+// folder, through the same conflict handling as paste.
+void TestQmlViews::splitPaneTransfers()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    QVERIFY(QDir().mkpath(tree.filePath("left")));
+    QVERIFY(QDir().mkpath(tree.filePath("right")));
+    tree.writeFile("left/a.txt");
+    tree.writeFile("left/b.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.filePath("right"));
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    window->requestActivate();
+    auto *slot = window->property("currentSlot").value<QObject *>();
+    QVERIFY(QMetaObject::invokeMethod(slot, "restoreSplit", Q_ARG(QVariant, tree.filePath("left")),
+                                      Q_ARG(QVariant, 1)));
+    QTRY_VERIFY(window->property("splitOpen").toBool());
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("left"));
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+    tab->forceActiveFocus();
+
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("a.txt"))));
+    QTest::keyClick(window, Qt::Key_F5);
+    QTRY_VERIFY(QFileInfo::exists(tree.filePath("right/a.txt")));
+    QVERIFY(QFileInfo::exists(tree.filePath("left/a.txt")));
+
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("b.txt"))));
+    QTest::keyClick(window, Qt::Key_F6);
+    QTRY_VERIFY(QFileInfo::exists(tree.filePath("right/b.txt")));
+    QTRY_VERIFY(!QFileInfo::exists(tree.filePath("left/b.txt")));
+
+    // A name already there asks first: the conflict dialog, not a clobber.
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("a.txt"))));
+    QTest::keyClick(window, Qt::Key_F5);
+    QTest::qWait(200);
+    QVERIFY(window->property("pendingTransfer").isValid()
+            && !window->property("pendingTransfer").value<QJSValue>().isNull());
+
+    // Ctrl+F6 switches panes (F6 is move now).
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTest::keyClick(window, Qt::Key_F6, Qt::ControlModifier);
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("right"));
+}
+
+// Finder-style shortening: start + "…" + end, within the given lines, and
+// untouched when the name already fits.
+void TestQmlViews::longNamesKeepTheirEnds()
+{
+    Platform platform;
+    const QString name = QStringLiteral("a very long holiday photo name from the summer trip to the coast (copy).jpg");
+    QCOMPARE(platform.elideMiddle(QStringLiteral("short.txt"), 12, 200, 2), QStringLiteral("short.txt"));
+
+    const QString two = platform.elideMiddle(name, 12, 90, 2);
+    QVERIFY(two.contains(QChar(0x2026)));
+    QVERIFY(two.startsWith(QStringLiteral("a very")));
+    QVERIFY(two.endsWith(QStringLiteral(".jpg")));
+    QVERIFY(two.size() < name.size());
+    QVERIFY(two.size() > 10); // as much as fits, not a stub
+
+    // More room keeps more; one line keeps less.
+    QVERIFY(platform.elideMiddle(name, 12, 90, 3).size() > two.size());
+    QVERIFY(platform.elideMiddle(name, 12, 90, 1).size() < two.size());
+    // Degenerate input is returned as is.
+    QCOMPARE(platform.elideMiddle(name, 12, 0, 2), name);
+}
+
+// A new tab (Ctrl+T, vim t) or a tab switch must hand the keyboard to the
+// tab now showing — not leave it on the one StackLayout just hid.
+void TestQmlViews::newTabTakesTheKeys()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    {
+        QFile settings(config.filePath("OMANTA_SETTINGS_FILE"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("defaultViewMode=list\n");
+    }
+    tree.writeFile("a.txt");
+    tree.writeFile("b.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    window->requestActivate();
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+    const auto current = [&] {
+        return qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    };
+    current()->forceActiveFocus();
+    QTRY_VERIFY(current()->hasActiveFocus());
+
+    const auto checkKeysWork = [&] {
+        QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+        QTRY_VERIFY(current()->hasActiveFocus());
+        QTest::keyClick(window, 'j');
+        QTRY_COMPARE(window->property("currentName").toString(), QStringLiteral("a.txt"));
+        QTest::keyClick(window, 'j');
+        QTRY_COMPARE(window->property("currentName").toString(), QStringLiteral("b.txt"));
+    };
+
+    QTest::keyClick(window, Qt::Key_T, Qt::ControlModifier); // Ctrl+T
+    QTRY_COMPARE(window->property("tabCount").toInt(), 2);
+    checkKeysWork();
+
+    QTest::keyClick(window, 't'); // vim t
+    QTRY_COMPARE(window->property("tabCount").toInt(), 3);
+    checkKeysWork();
+
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ControlModifier); // switch
+    checkKeysWork();
+
+    QTest::keyClick(window, 'q'); // close: the tab left behind takes over
+    QTRY_COMPARE(window->property("tabCount").toInt(), 2);
+    QTRY_VERIFY(current()->hasActiveFocus());
+    QTest::keyClick(window, 'k');
+    QTRY_COMPARE(window->property("currentName").toString(), QStringLiteral("a.txt"));
+}
+
+// `?` opens every key with the search focused; typing narrows the rows,
+// Esc clears the search first and closes on the second press.
+void TestQmlViews::shortcutsSearch()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    tree.writeFile("a.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    window->requestActivate();
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 1);
+    tab->forceActiveFocus();
+    QTRY_VERIFY(tab->hasActiveFocus());
+
+    auto *dialog = window->findChild<QObject *>("shortcutsDialog");
+    QVERIFY(dialog);
+    const auto rowCount = [&] {
+        int rows = 0;
+        for (const QVariant &group : dialog->property("groups").toList())
+            rows += group.toMap().value("rows").toList().size();
+        return rows;
+    };
+    const int all = rowCount();
+    QVERIFY(all > 20);
+
+    QTest::keyClick(window, '?');
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    for (const char c : QByteArray("new tab"))
+        QTest::keyClick(window, c);
+    QTRY_VERIFY(rowCount() > 0);
+    QVERIFY(rowCount() < 5);
+    for (const QVariant &group : dialog->property("groups").toList()) {
+        for (const QVariant &row : group.toMap().value("rows").toList()) {
+            const QString text = row.toStringList().join(QLatin1Char(' ')).toLower()
+                + QLatin1Char(' ') + group.toMap().value("name").toString().toLower();
+            QVERIFY2(text.contains("new") && text.contains("tab"), qPrintable(text));
+        }
+    }
+
+    QTest::keyClick(window, Qt::Key_Escape); // clears the search
+    QTRY_COMPARE(rowCount(), all);
+    QVERIFY(dialog->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape); // closes
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+}
+
+static int countByObjectName(QQuickItem *item, const char *name)
+{
+    int found = item->objectName() == QLatin1String(name) && item->isVisible() ? 1 : 0;
+    for (QQuickItem *child : item->childItems())
+        found += countByObjectName(child, name);
+    return found;
+}
+
+// Columns (Finder) and Gallery: one column per ancestor plus the current
+// folder and a preview; h goes up selecting where you came from, l goes in;
+// the gallery steps with h/l and its preview follows. Space still previews.
+void TestQmlViews::columnsAndGalleryViews()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    QVERIFY(QDir().mkpath(tree.filePath("a/b/c")));
+    tree.writeFile("a/b/c/deep.txt");
+    tree.writeFile("a/b/note.txt");
+    tree.writeFile("a/b/photo.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.filePath("a/b"));
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    window->requestActivate();
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 3); // c/, note, photo
+    tab->forceActiveFocus();
+    QTRY_VERIFY(tab->hasActiveFocus());
+    const auto name = [&] { return window->property("currentName").toString(); };
+
+    // ---- Columns ----
+    QTest::keyClick(window, Qt::Key_3, Qt::ControlModifier);
+    QTRY_COMPARE(window->property("viewMode").toString(), QStringLiteral("columns"));
+    const int crumbs = platform.pathCrumbs(tree.filePath("a/b")).size();
+    QTRY_COMPARE(countByObjectName(window->contentItem(), "ancestorColumn"), crumbs - 1);
+    QCOMPARE(countByObjectName(window->contentItem(), "currentColumn"), 1);
+
+    QTest::keyClick(window, 'j');
+    QTRY_COMPARE(name(), QStringLiteral("c"));
+    // The preview column shows the current item (a folder: its contents).
+    QTRY_COMPARE(tab->property("viewPreviewLocation").toString(), tree.filePath("a/b/c"));
+    QTest::keyClick(window, 'l'); // into c: one more column
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a/b/c"));
+    QTRY_COMPARE(countByObjectName(window->contentItem(), "ancestorColumn"), crumbs);
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 1);
+    QTest::keyClick(window, 'j');
+    QTRY_COMPARE(name(), QStringLiteral("deep.txt"));
+    QTRY_COMPARE(tab->property("viewPreviewLocation").toString(), tree.filePath("a/b/c/deep.txt"));
+    QTest::keyClick(window, 'h'); // back up: c is selected again
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a/b"));
+    QTRY_COMPARE(name(), QStringLiteral("c"));
+    QCOMPARE(tab->property("selectionCount").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Left); // ← is h too: up to a, b selected
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a"));
+    QTRY_COMPARE(name(), QStringLiteral("b"));
+    QTest::keyClick(window, Qt::Key_Right); // → into b
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a/b"));
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 3);
+
+    // ---- Gallery ----
+    QTest::keyClick(window, Qt::Key_4, Qt::ControlModifier);
+    QTRY_COMPARE(window->property("viewMode").toString(), QStringLiteral("gallery"));
+    QTRY_COMPARE(countByObjectName(window->contentItem(), "galleryStrip"), 1);
+    QTest::keyClick(window, 'g');
+    QTRY_COMPARE(name(), QStringLiteral("c"));
+    QTest::keyClick(window, 'l');
+    QTRY_COMPARE(name(), QStringLiteral("note.txt"));
+    QTRY_COMPARE(tab->property("viewPreviewLocation").toString(), tree.filePath("a/b/note.txt"));
+    QTest::keyClick(window, Qt::Key_Right);
+    QTRY_COMPARE(name(), QStringLiteral("photo.txt"));
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(name(), QStringLiteral("note.txt"));
+    QTest::keyClick(window, Qt::Key_Space); // the quick view still opens
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!window->property("quickViewOpen").toBool());
+
+    // Going up in the list view lands on the folder you left, too.
+    QTest::keyClick(window, Qt::Key_1, Qt::ControlModifier);
+    QTRY_COMPARE(window->property("viewMode").toString(), QStringLiteral("list"));
+    QTest::keyClick(window, Qt::Key_Backspace);
+    QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a"));
+    QTRY_COMPARE(name(), QStringLiteral("b"));
+}
+
+// A file dragged over the window: the label beside the pointer says what a
+// drop does, a folder rested on springs open, and the drop lands where the
+// pointer is — through real Qt drag events, as another app would send them.
+void TestQmlViews::dragLabelAndSpringLoadedFolders()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    {
+        QFile settings(config.filePath("OMANTA_SETTINGS_FILE"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("defaultViewMode=list\nspringLoadDelay=0.75\n");
+    }
+    QVERIFY(QDir().mkpath(tree.filePath("view/inbox/deeper")));
+    const QString source = tree.writeFile("outside/report.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.filePath("view"));
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 1);
+    QQuickItem *inboxRow = nullptr;
+    QTRY_VERIFY((inboxRow = findFileRow(window->contentItem(), tree.filePath("view/inbox"))));
+    const QPoint overInbox = centreOf(inboxRow);
+
+    QMimeData mime;
+    mime.setUrls({ QUrl::fromLocalFile(source) });
+    QDragEnterEvent enter(overInbox, Qt::CopyAction | Qt::MoveAction | Qt::LinkAction, &mime,
+                          Qt::LeftButton, Qt::NoModifier);
+    QGuiApplication::sendEvent(window, &enter);
+    QDragMoveEvent move(overInbox + QPoint(1, 0), Qt::CopyAction | Qt::MoveAction | Qt::LinkAction,
+                        &mime, Qt::LeftButton, Qt::NoModifier);
+    QGuiApplication::sendEvent(window, &move);
+
+    auto *label = window->findChild<QObject *>("dragLabelText");
+    QVERIFY(label);
+    QTRY_VERIFY(window->findChild<QObject *>("dragLabel")->property("visible").toBool());
+    // Same filesystem, no keys: a move, into the folder under the pointer.
+    QTRY_VERIFY(label->property("text").toString().contains(QStringLiteral("Move to “inbox”")));
+
+    // One of omanta's own drags: a single card the window draws at the
+    // pointer — [▣ 5 items | Move] — and no separate badge.
+    auto *dragState = engine.singletonInstance<QObject *>("Omanta", "DragState");
+    QVERIFY(dragState);
+    dragState->setProperty("cardText", QStringLiteral("5 items"));
+    dragState->setProperty("ownDrag", true);
+    auto *card = window->findChild<QQuickItem *>("dragCard");
+    QVERIFY(card);
+    QTRY_VERIFY(card->isVisible());
+    QVERIFY(!window->findChild<QQuickItem *>("dragLabel")->isVisible());
+    QCOMPARE(window->findChild<QObject *>("dragCardText")->property("text").toString(), QStringLiteral("5 items"));
+    QCOMPARE(window->findChild<QObject *>("dragCardAction")->property("text").toString(), QStringLiteral("Move"));
+    const QPointF pointer = window->contentItem()->mapFromScene(QPointF(overInbox + QPoint(1, 0)));
+    QCOMPARE(card->x(), pointer.x() - 28);
+    QCOMPARE(card->y(), pointer.y() - 28);
+    // Trash is destructive: the action turns the error colour.
+    QVERIFY(!dragState->property("destructive").toBool());
+    dragState->setProperty("action", QStringLiteral("trash"));
+    QVERIFY(dragState->property("destructive").toBool());
+    QTRY_COMPARE(window->findChild<QObject *>("dragCardAction")->property("text").toString(), QStringLiteral("Trash"));
+    QCOMPARE(window->findChild<QObject *>("dragCardAction")->property("color").value<QColor>(),
+             card->property("border").value<QObject *>()->property("color").value<QColor>());
+    QVERIFY(QMetaObject::invokeMethod(dragState, "refresh")); // back to what the pointer is over
+    dragState->setProperty("ownDrag", false);
+
+    // Resting on the folder opens it (spring-loaded), drag still going.
+    QTRY_COMPARE_WITH_TIMEOUT(window->property("currentPath").toString(), tree.filePath("view/inbox"), 3000);
+
+    // Drop on the background of the folder now showing.
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 1); // deeper/
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    const QPoint empty = tab->mapToScene(QPointF(tab->width() / 2, tab->height() - 40)).toPoint();
+    QDragMoveEvent moveEmpty(empty, Qt::CopyAction | Qt::MoveAction | Qt::LinkAction, &mime,
+                             Qt::LeftButton, Qt::NoModifier);
+    QGuiApplication::sendEvent(window, &moveEmpty);
+    QTRY_VERIFY(label->property("text").toString().contains(QStringLiteral("“inbox”")));
+    QDropEvent drop(empty, Qt::CopyAction | Qt::MoveAction | Qt::LinkAction, &mime,
+                    Qt::LeftButton, Qt::NoModifier);
+    QGuiApplication::sendEvent(window, &drop);
+    QTRY_VERIFY(QFileInfo::exists(tree.filePath("view/inbox/report.txt")));
+    QTRY_VERIFY(!QFileInfo::exists(source)); // a move, as the label said
+    QTRY_VERIFY(!window->findChild<QObject *>("dragLabel")->property("visible").toBool());
+}
+
+// The real gesture: press a row and move past the threshold. FileDrag must
+// hand the drag to DragSource (a QML→C++ call that once failed type
+// conversion, so no drag ever started) and hear it finish. Esc ends it.
+void TestQmlViews::dragGestureStartsADrag()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|Could not convert|\\.qml:\\d+"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    {
+        QFile settings(config.filePath("OMANTA_SETTINGS_FILE"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("defaultViewMode=list\n");
+    }
+    const QString file = tree.writeFile("drag-me.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 1);
+    QQuickItem *row = nullptr;
+    QTRY_VERIFY((row = findFileRow(window->contentItem(), file)));
+
+    auto *dragSource = engine.singletonInstance<QObject *>("Omanta", "DragSource");
+    QVERIFY(dragSource);
+    QSignalSpy finished(dragSource, SIGNAL(finished(int,int)));
+    QSignalSpy activeChanged(dragSource, SIGNAL(activeChanged()));
+
+    // Whatever drag loop the platform runs, Esc ends it.
+    QTimer escape;
+    escape.setInterval(50);
+    QObject::connect(&escape, &QTimer::timeout, [window] {
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QGuiApplication::sendEvent(window, &press);
+    });
+    escape.start();
+
+    const int pressDelay = QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+    const QPoint start = centreOf(row);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start, pressDelay);
+    QTRY_VERIFY(findItem(row, "ready", true));
+    for (int step = 1; step <= 6; ++step)
+        QTest::mouseMove(window, start + QPoint(step * 8, step * 4), 20);
+    QTRY_VERIFY(activeChanged.count() >= 1);   // DragSource took the drag
+    QTRY_COMPARE(finished.count(), 1);         // …and it ended
+    QVERIFY(!dragSource->property("active").toBool());
+    escape.stop();
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, start + QPoint(48, 24));
 }
 
 #include "tst_qmlviews.moc"

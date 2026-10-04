@@ -141,12 +141,10 @@ Item {
 
             // Empty space accepts drops into the folder being viewed. Behind
             // the list, so folder rows' own DropAreas win where they overlap.
-            DropArea {
+            FileDropArea {
                 anchors.fill: parent
-                onDropped: drop => {
-                    root.tab.requestDrop(drop.urls, root.tab.path);
-                    drop.accept();
-                }
+                destination: root.tab.path
+                onFilesDropped: urls => root.tab.requestDrop(urls, root.tab.path)
             }
 
             ListView {
@@ -280,7 +278,9 @@ Item {
                                 text: row.displayName
                                 color: root.tab.isSelected(row.name) ? Colors.selectionText : Colors.text
                                 font.pixelSize: 13
-                                elide: Text.ElideRight
+                                // Finder-style: the start and the end (the
+                                // extension, a "(copy)") both stay readable.
+                                elide: Text.ElideMiddle
                                 width: Math.max(0, Math.min(implicitWidth,
                                                 nameCell.width - root.iconSize - 8
                                                 - (root.tab.treeActive ? row.depth * 18 + 22 : 0)))
@@ -308,15 +308,15 @@ Item {
 
                 // Folders take drops directly; the hairline highlight is the
                 // selection colour so the target is unmistakable.
-                DropArea {
+                FileDropArea {
                     id: rowDrop
 
                     anchors.fill: parent
                     enabled: row.isDir
-                    onDropped: drop => {
-                        root.tab.requestDrop(drop.urls, row.filePath);
-                        drop.accept();
-                    }
+                    destination: row.filePath
+                    springLoaded: true
+                    onFilesDropped: urls => root.tab.requestDrop(urls, row.filePath)
+                    onSprung: root.tab.navigate(row.filePath)
                 }
 
                 Rectangle {

@@ -1,9 +1,14 @@
 #include "Application.h"
+#include "Settings.h"
 #include "Location.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QJSValue>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -20,6 +25,18 @@ Application::Application(QQmlApplicationEngine *engine, QObject *parent)
     : QObject(parent)
     , m_engine(engine)
 {
+    // A quit with windows still up (logout, `omanta --quit` one day): all of
+    // them are the session. Closing the last window saves it in
+    // windowClosed() instead, before this runs with none left.
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
+        QList<QObject *> open;
+        for (const QPointer<QObject> &window : std::as_const(m_windows)) {
+            if (window)
+                open.append(window);
+        }
+        if (!open.isEmpty())
+            saveSession(open);
+    });
 }
 
 int Application::windowCount() const
@@ -37,7 +54,8 @@ void Application::openWindow(const QString &path, const QString &selectName)
     createWindow(path, selectName);
 }
 
-QObject *Application::createWindow(const QString &path, const QString &selectName)
+QObject *Application::createWindow(const QString &path, const QString &selectName,
+                                   const QVariantMap &session)
 {
     QString target = Location::clean(path);
     // URIs are taken on trust — a sync stat of a remote location would block,
@@ -56,6 +74,8 @@ QObject *Application::createWindow(const QString &path, const QString &selectNam
         { QStringLiteral("initialPath"), target },
         { QStringLiteral("initialSelection"), selectName },
     };
+    if (!session.isEmpty())
+        initial.insert(QStringLiteral("initialSession"), session);
 
     QObject *window = component.createWithInitialProperties(initial);
     if (!window) {
@@ -254,8 +274,80 @@ QVariantMap Application::windowState() const
     return {};
 }
 
+QVariantMap Application::windowSession(QObject *window)
+{
+    QVariant state;
+    if (!window || !QMetaObject::invokeMethod(window, "sessionState", Q_RETURN_ARG(QVariant, state)))
+        return {};
+    QVariant value = state;
+    if (value.canConvert<QJSValue>())
+        value = value.value<QJSValue>().toVariant();
+    return value.toMap();
+}
+
+QString Application::sessionJson() const
+{
+    QJsonArray windows;
+    for (const QPointer<QObject> &window : m_windows) {
+        const QVariantMap state = windowSession(window);
+        if (!state.isEmpty())
+            windows.append(QJsonObject::fromVariantMap(state));
+    }
+    return QString::fromUtf8(QJsonDocument(windows).toJson(QJsonDocument::Compact));
+}
+
+void Application::saveSession(const QList<QObject *> &windows) const
+{
+    if (!m_saveSession)
+        return;
+    QJsonArray saved;
+    for (QObject *window : windows) {
+        const QVariantMap state = windowSession(window);
+        if (!state.isEmpty())
+            saved.append(QJsonObject::fromVariantMap(state));
+    }
+    Settings settings;
+    if (!settings.restoreSession())
+        return;
+    settings.setSessionState(QString::fromUtf8(QJsonDocument(saved).toJson(QJsonDocument::Compact)));
+}
+
+bool Application::restoreSession(const QString &json)
+{
+    const QJsonArray windows = QJsonDocument::fromJson(json.toUtf8()).array();
+    int opened = 0;
+    for (const QJsonValue &value : windows) {
+        QVariantMap session = value.toObject().toVariantMap();
+        QVariantList kept;
+        for (const QVariant &tabValue : session.value(QStringLiteral("tabs")).toList()) {
+            QVariantMap tab = tabValue.toMap();
+            const auto usable = [](const QString &location) {
+                // A folder deleted since, or an unmounted drive: dropped. URIs
+                // are taken on trust, as everywhere else (no sync network stat).
+                return !location.isEmpty()
+                    && (Location::isUri(location) || QFileInfo(location).isDir());
+            };
+            if (!usable(tab.value(QStringLiteral("path")).toString()))
+                continue;
+            if (!usable(tab.value(QStringLiteral("second")).toString()))
+                tab.insert(QStringLiteral("split"), false);
+            kept.append(tab);
+        }
+        if (kept.isEmpty())
+            continue;
+        session.insert(QStringLiteral("tabs"), kept);
+        if (createWindow(kept.first().toMap().value(QStringLiteral("path")).toString(), {}, session))
+            ++opened;
+    }
+    return opened > 0;
+}
+
 void Application::windowClosed(QObject *window)
 {
+    // The last window to close is the session to come back to.
+    if (windowCount() == 1)
+        saveSession({ window });
+
     m_windows.removeIf([window](const QPointer<QObject> &tracked) {
         return tracked.isNull() || tracked == window;
     });

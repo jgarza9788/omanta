@@ -84,6 +84,18 @@ void Settings::set(const QString &key, const QString &value)
     Q_EMIT changed();
 }
 
+void Settings::setSessionState(const QString &json)
+{
+    // One line in a line-based file: a newline would split it into junk keys.
+    QString value = json;
+    value.remove(QLatin1Char('\n'));
+    value.remove(QLatin1Char('\r'));
+    if (m_values.value(QStringLiteral("sessionState")) == value)
+        return;
+    m_values.insert(QStringLiteral("sessionState"), value);
+    save(); // no changed(): see the header
+}
+
 bool Settings::boolFor(const char *key, bool fallback) const
 {
     const QString value = m_values.value(QLatin1String(key));

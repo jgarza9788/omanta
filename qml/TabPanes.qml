@@ -22,6 +22,11 @@ FocusScope {
     signal mountNeeded(string location)
     signal transferRequested(var sources, string destination, bool isMove)
     signal previewUnavailable()
+    signal commandRequested(string command, var arg)
+
+    // The pane that is not active — where "copy to other pane" lands.
+    readonly property Item otherPane: split && secondLoader.item
+        ? (activePane === firstCell.tab ? secondLoader.item.tab : firstCell.tab) : null
 
     function setActive(pane) {
         if (activePane !== pane)
@@ -39,6 +44,21 @@ FocusScope {
             split = false;
         }
         activePane.forceActiveFocus();
+    }
+
+    // Session save/restore: where each pane is.
+    function sessionState() {
+        return { path: firstCell.tab.path,
+                 split: split,
+                 second: split && secondLoader.item ? secondLoader.item.tab.path : "",
+                 active: activePaneIndex };
+    }
+
+    function restoreSplit(secondPath, active) {
+        secondLoader.spawnPath = secondPath;
+        split = true;
+        if (active === 1 && secondLoader.item)
+            activePane = secondLoader.item.tab;
     }
 
     function cyclePane() {
@@ -105,6 +125,7 @@ FocusScope {
                 onTransferRequested: (sources, destination, isMove) =>
                     slot.transferRequested(sources, destination, isMove)
                 onPreviewUnavailable: slot.previewUnavailable()
+                onCommandRequested: (command, arg) => slot.commandRequested(command, arg)
             }
         }
 

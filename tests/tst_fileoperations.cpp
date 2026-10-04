@@ -20,6 +20,7 @@ class TestFileOperations : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
+    void duplicateIntoOwnFolderAndUndo();
     void cancelledCopyReturnsCompletedJournal();
     void failedMoveKeepsPartialUndo();
     void unsupportedTrashReportsOnlyItsOwnSources();
@@ -351,6 +352,33 @@ void TestFileOperations::copyRenamesRatherThanClobbering()
     QCOMPARE(QFileInfo(tree.filePath("target/notes.txt")).size(), 999);
     QVERIFY(QFileInfo::exists(tree.filePath("target/notes (copy).txt")));
     QCOMPARE(QFileInfo(tree.filePath("target/notes (copy).txt")).size(), 5);
+}
+
+// Duplicate (Ctrl+Shift+D) is a copy into the item's own folder: the
+// rename-on-conflict naming gives "name (copy)", then "(copy 2)", folders
+// included, and each is one undo.
+void TestFileOperations::duplicateIntoOwnFolderAndUndo()
+{
+    TempTree tree;
+    tree.writeFile("notes.txt", 5);
+    tree.writeFile("album/a.jpg", 3);
+    FileOperations ops;
+
+    ops.copy({ tree.filePath("notes.txt"), tree.filePath("album") }, tree.path(),
+             FileOperations::RenameNew);
+    QVERIFY(settle(ops));
+    QCOMPARE(QFileInfo(tree.filePath("notes (copy).txt")).size(), 5);
+    QVERIFY(QFileInfo::exists(tree.filePath("album (copy)/a.jpg")));
+
+    ops.copy({ tree.filePath("notes.txt") }, tree.path(), FileOperations::RenameNew);
+    QVERIFY(settle(ops));
+    QVERIFY(QFileInfo::exists(tree.filePath("notes (copy 2).txt")));
+
+    ops.undo();
+    QVERIFY(settle(ops));
+    QVERIFY(!QFileInfo::exists(tree.filePath("notes (copy 2).txt")));
+    QVERIFY(QFileInfo::exists(tree.filePath("notes (copy).txt")));
+    QCOMPARE(QFileInfo(tree.filePath("notes.txt")).size(), 5);
 }
 
 void TestFileOperations::copyCanReplaceWhenAsked()

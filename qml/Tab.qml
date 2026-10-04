@@ -20,12 +20,25 @@ FocusScope {
     property string searchDateKind: "modified"
     property string searchDateRange: "any"
     property string searchTypeFilter: "any"
+    // "auto" (text, glob on wildcards, regex after re:) or "regex" — the .*
+    // toggle. Sticky per tab, like searchContent.
+    property string searchMatchMode: "auto"
+    readonly property bool searchPatternInvalid: searchQuery !== ""
+        && searchModel.unavailableReason.startsWith("Invalid pattern")
+
+    // The in-folder filter (`/`): narrows the listing as you type without
+    // leaving the folder. filterEditing is whether its field has the keys.
+    property string filterText: ""
+    property string filterMode: "auto"
+    property bool filterEditing: false
+    readonly property bool filterActive: filterText !== "" || filterEditing
+    readonly property string filterError: proxy.nameFilterError
 
     // Expandable folders (Nautilus's use-tree-view) only make sense over a
     // real directory listing in the list view; everywhere else the flat
     // proxy serves as always.
     readonly property bool treeActive: viewMode === "list" && Settings.useTreeView
-        && searchQuery === "" && !viewingStarred && !viewingNetwork
+        && searchQuery === "" && filterText === "" && !viewingStarred && !viewingNetwork
     // The model the views and every helper below speak to. The two carry the
     // same roles and the same invokable surface, so nothing downstream knows
     // which is live.
@@ -46,6 +59,12 @@ FocusScope {
         }
         if (dirModel.errorMessage)
             return dirModel.errorMessage;
+        if (filterText !== "") {
+            if (filterError)
+                return filterError;
+            const matching = files.count === 1 ? "1 item matches" : files.count + " items match";
+            return selectionCount > 0 ? matching + ", " + selectionCount + " selected" : matching;
+        }
         if (dirModel.loading)
             return "Loading…";
         const total = files.count;
@@ -71,12 +90,14 @@ FocusScope {
     // view and it survives a restart.
     readonly property int iconZoom: Settings.iconZoom
     readonly property int listZoom: Settings.listZoom
-    readonly property int zoom: viewMode === "list" ? listZoom : iconZoom
-    readonly property var zoomLevels: viewMode === "list"
+    // List and Columns size rows (listZoom); Grid and Gallery size pictures.
+    readonly property bool rowZoom: viewMode === "list" || viewMode === "columns"
+    readonly property int zoom: rowZoom ? listZoom : iconZoom
+    readonly property var zoomLevels: rowZoom
         ? [16, 18, 24, 32, 48, 64] : [32, 48, 64, 80, 96, 112, 128]
     readonly property int minimumZoom: zoomLevels[0]
     readonly property int maximumZoom: zoomLevels[zoomLevels.length - 1]
-    readonly property int defaultZoom: viewMode === "list" ? 18 : 64
+    readonly property int defaultZoom: rowZoom ? 18 : 64
     property bool showHidden: Settings.showHiddenFiles
     property int sortKey: FileSortFilterModel.ByName
     property bool sortDescending: false
@@ -116,6 +137,9 @@ FocusScope {
     // Space found no previewer (Sushi not installed). Nothing else happens —
     // a look-only key must never open or extract — the window says why.
     signal previewUnavailable()
+    // A vim key asked for something the window owns — clipboard, dialogs,
+    // tabs, the sidebar (see Keymap.js). `arg` carries a place number etc.
+    signal commandRequested(string command, var arg)
 
     readonly property bool viewingStarred: path === "starred:///"
     readonly property bool viewingNetwork: path === "network:///"
@@ -156,6 +180,7 @@ FocusScope {
         dateKind: root.searchDateKind
         dateRange: root.searchDateRange
         typeFilter: root.searchTypeFilter
+        matchMode: root.searchMatchMode
     }
 
     StarredModel {
@@ -182,6 +207,8 @@ FocusScope {
         showHidden: root.showHidden
         sortKey: root.sortKey
         sortDescending: root.sortDescending
+        nameFilter: root.filterText
+        nameFilterMode: root.filterMode
         // Nautilus preference, false out of the box: folders sort with the
         // files unless the user asks otherwise.
         foldersFirst: Settings.sortFoldersFirst
@@ -208,6 +235,8 @@ FocusScope {
         clearSelection();
         currentIndex = -1;
         searchQuery = ""; // navigating away is leaving the search
+        filterText = "";  // and the filter: it was about that folder
+        filterEditing = false;
         if (history.current !== path)
             history.visit(path);
     }
@@ -306,8 +335,12 @@ FocusScope {
 
     function goUp() {
         const parent = Platform.parentPath(root.path);
-        if (parent)
-            navigate(parent);
+        if (!parent)
+            return;
+        // Land on the folder just left, as Nautilus and Finder do — what
+        // makes h, h, l in Columns come back the way it went.
+        root.pendingSelection = Platform.baseName(root.path);
+        navigate(parent);
     }
 
     function activate(row) {
@@ -328,6 +361,49 @@ FocusScope {
 
     function reload() { dirModel.reload(); }
 
+    // ---- filter (`/`) -----------------------------------------------------
+
+    function openFilter() {
+        filterEditing = true;
+        filterBar.focusField();
+    }
+
+    // Enter: keep the filter, hand the keys back to the files, and land on
+    // the first match so j/k/Enter carry straight on.
+    function commitFilter() {
+        filterEditing = false;
+        focusView();
+        if (currentIndex < 0 && files.count > 0)
+            setCurrent(0, false);
+    }
+
+    function clearFilter() {
+        filterText = "";
+        filterEditing = false;
+        focusView();
+    }
+
+    // The view, not just this scope: a FocusScope hands focus back to the
+    // child that last had it, which after `/` is the filter field.
+    function focusView() {
+        viewLoader.forceActiveFocus();
+    }
+
+    function toggleFilterMode() { filterMode = filterMode === "regex" ? "auto" : "regex"; }
+
+    // Select by pattern (Ctrl+S, vim `*`): every visible name that matches.
+    function selectMatching(pattern, mode) {
+        const names = files.namesMatching(pattern, mode || "auto");
+        selectNames(names);
+        if (names.length > 0) {
+            const row = files.proxyRowForName(names[0]);
+            currentIndex = row;
+            anchorIndex = row;
+            positionAt(row);
+        }
+        return names.length;
+    }
+
     // Quick Look (Space): the one selected item, or the current row, in the
     // system previewer. `toggle` makes a second Space close it.
     function previewRow() {
@@ -340,6 +416,12 @@ FocusScope {
         const row = previewRow();
         if (row < 0 || row >= files.count)
             return;
+        // The built-in quick view needs nothing installed; Sushi remains
+        // a preference away.
+        if (Settings.previewer !== "sushi") {
+            commandRequested("quickview", null);
+            return;
+        }
         if (Previewer.show(actionPathAt(row), toggle))
             Previewer.owner = root;
         else
@@ -383,14 +465,15 @@ FocusScope {
         if (paths.indexOf(destination) >= 0)
             return;
 
-        const mods = Platform.keyboardModifiers();
-        let isMove;
-        if (mods & Qt.ControlModifier)
-            isMove = false;
-        else if (mods & Qt.ShiftModifier)
-            isMove = true;
-        else
-            isMove = Platform.sameFilesystem(paths[0], destination);
+        // The same rule the label beside the pointer showed (DragState):
+        // Ctrl copies, Shift moves, Ctrl+Shift or Alt links.
+        const action = DragState.actionFor(paths, destination);
+        if (action === "link") {
+            if (Platform.isLocal(destination))
+                FileOperations.createLink(paths, destination);
+            return;
+        }
+        const isMove = action === "move";
 
         // Moving things into the folder they are already in is a no-op, not
         // an operation with a conflict dialog.
@@ -558,7 +641,7 @@ FocusScope {
 
     function setZoom(value) {
         const size = Math.max(minimumZoom, Math.min(maximumZoom, value));
-        if (viewMode === "list")
+        if (rowZoom)
             Settings.listZoom = size;
         else
             Settings.iconZoom = size;
@@ -617,8 +700,94 @@ FocusScope {
 
     // ---- keyboard ---------------------------------------------------------
 
+    readonly property bool vimKeys: Settings.keyboardMode === "vim"
+
+    function cycleSort() {
+        const order = [FileSortFilterModel.ByName, FileSortFilterModel.ByModified,
+                       FileSortFilterModel.BySize, FileSortFilterModel.ByType];
+        const next = order[(order.indexOf(sortKey) + 1) % order.length];
+        sortKey = next;
+        // Newest and largest first are what people mean by those two.
+        sortDescending = next === FileSortFilterModel.ByModified
+                      || next === FileSortFilterModel.BySize;
+    }
+
+    // Vim keys (Settings.keyboardMode), the Omarchy-plugin set. Returns
+    // whether the key was taken. Only modifier-free (or Shift) presses come
+    // here, so every Ctrl/Alt shortcut keeps working unchanged.
+    function handleVimKey(event) {
+        const t = event.text;
+        // Grid and Gallery move sideways with h/l; List and Columns go up/in.
+        const grid = viewMode === "icon" || viewMode === "gallery";
+        switch (t) {
+        case "j": moveCurrent(viewColumns, false); return true;
+        case "k": moveCurrent(-viewColumns, false); return true;
+        case "J": moveCurrent(viewColumns, true); return true;
+        case "K": moveCurrent(-viewColumns, true); return true;
+        case "h":
+            if (grid) moveCurrent(-1, false);
+            else if (treeActive && currentIndex >= 0 && files.valueAt(currentIndex, "expanded"))
+                files.collapse(currentIndex);
+            else goUp();
+            return true;
+        case "l":
+            if (grid) moveCurrent(1, false);
+            else if (treeActive && currentIndex >= 0 && files.valueAt(currentIndex, "isDir")
+                     && !files.valueAt(currentIndex, "expanded"))
+                files.expand(currentIndex);
+            else activate(currentIndex);
+            return true;
+        case "-": goUp(); return true;
+        case "~": navigate(Platform.homePath()); return true;
+        case "g": setCurrent(0, false); return true;
+        case "G": setCurrent(files.count - 1, false); return true;
+        case "v":
+            if (currentIndex >= 0)
+                toggleSelection(files.valueAt(currentIndex, "name"));
+            return true;
+        case "V": selectAll(); return true;
+        case "/": openFilter(); return true;
+        case ".": showHidden = !showHidden; return true;
+        case "s": cycleSort(); return true;
+        case "i": commandRequested("info", null); return true;
+        case "*": commandRequested("selectPattern", null); return true;
+        case "f": commandRequested("search", null); return true;
+        case "y": commandRequested("copy", null); return true;
+        case "Y": commandRequested("duplicate", null); return true;
+        case "x": commandRequested("cut", null); return true;
+        case "p": commandRequested("paste", null); return true;
+        case "P": commandRequested("pip", null); return true;
+        case "c": commandRequested("copyToOther", null); return true;
+        case "m": commandRequested("moveToOther", null); return true;
+        case "r": commandRequested("rename", null); return true;
+        case "a": commandRequested("newFolder", null); return true;
+        case "D": commandRequested("trash", null); return true;
+        case "u": commandRequested("undo", null); return true;
+        case "U": commandRequested("redo", null); return true;
+        case "o": requestContextMenu(); return true;
+        case "t": commandRequested("newTab", null); return true;
+        case "q": commandRequested("closeTab", null); return true;
+        case "b": commandRequested("sidebar", null); return true;
+        case "?": commandRequested("help", null); return true;
+        }
+        if (t.length === 1 && t >= "1" && t <= "9") {
+            commandRequested("place", parseInt(t));
+            return true;
+        }
+        if (event.key === Qt.Key_Tab && !(event.modifiers & Qt.ShiftModifier)) {
+            commandRequested("otherPane", null);
+            return true;
+        }
+        return false;
+    }
+
     Keys.onPressed: event => {
         const extend = (event.modifiers & Qt.ShiftModifier) !== 0;
+        if (vimKeys && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+            && handleVimKey(event)) {
+            event.accepted = true;
+            return;
+        }
         // Space previews — unless the user is mid-way through typing a name,
         // where it is part of the name.
         if (event.key === Qt.Key_Space && typeAhead.prefix === ""
@@ -635,7 +804,12 @@ FocusScope {
         case Qt.Key_Up:
             moveCurrent(-viewColumns, extend); event.accepted = true; return;
         case Qt.Key_Right:
-            if (viewMode === "icon") { moveCurrent(1, extend); event.accepted = true; }
+            if (viewMode === "icon" || viewMode === "gallery") { moveCurrent(1, extend); event.accepted = true; }
+            else if (viewMode === "columns" && currentIndex >= 0) {
+                if (files.valueAt(currentIndex, "isDir"))
+                    activate(currentIndex);
+                event.accepted = true;
+            }
             else if (treeActive && currentIndex >= 0) {
                 // GTK tree keys: Right expands a folder; on one already
                 // expanded it steps into the first child.
@@ -648,7 +822,8 @@ FocusScope {
             }
             return;
         case Qt.Key_Left:
-            if (viewMode === "icon") { moveCurrent(-1, extend); event.accepted = true; }
+            if (viewMode === "icon" || viewMode === "gallery") { moveCurrent(-1, extend); event.accepted = true; }
+            else if (viewMode === "columns") { goUp(); event.accepted = true; }
             else if (treeActive && currentIndex >= 0) {
                 // …and Left collapses, or from a plain row jumps to its parent.
                 if (files.valueAt(currentIndex, "expanded"))
@@ -679,14 +854,24 @@ FocusScope {
         case Qt.Key_Backspace:
             goUp(); event.accepted = true; return;
         case Qt.Key_Escape:
-            clearSelection(); event.accepted = true; return;
+            // One layer at a time: the filter, then the selection, then
+            // (with nothing left here) the window's search.
+            if (filterText !== "")
+                clearFilter();
+            else if (selectionCount > 0)
+                clearSelection();
+            else
+                commandRequested("escape", null);
+            event.accepted = true;
+            return;
         case Qt.Key_Menu:
             requestContextMenu(); event.accepted = true; return;
         }
 
         // Type-ahead. Modifier-free printable text jumps to the next match,
-        // continuing the current prefix if the user is still typing.
-        if (event.text.length > 0 && event.text.charCodeAt(0) >= 0x20
+        // continuing the current prefix if the user is still typing. In vim
+        // mode letters are commands; `/` does this job instead.
+        if (!vimKeys && event.text.length > 0 && event.text.charCodeAt(0) >= 0x20
             && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
             typeAhead.append(event.text);
             event.accepted = true;
@@ -719,9 +904,24 @@ FocusScope {
     Loader {
         id: viewLoader
 
-        anchors.fill: parent
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: filterBar.visible ? filterBar.top : parent.bottom
         focus: true
-        sourceComponent: root.viewMode === "icon" ? iconViewComponent : listViewComponent
+        sourceComponent: root.viewMode === "icon" ? iconViewComponent
+                       : root.viewMode === "columns" ? columnsViewComponent
+                       : root.viewMode === "gallery" ? galleryViewComponent
+                       : listViewComponent
+    }
+
+    FilterBar {
+        id: filterBar
+        tab: root
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: visible ? implicitHeight : 0
     }
 
     Component {
@@ -733,6 +933,20 @@ FocusScope {
         id: iconViewComponent
         FileIconView { tab: root; currentIndex: root.currentIndex }
     }
+
+    Component {
+        id: columnsViewComponent
+        ColumnsView { tab: root; currentIndex: root.currentIndex }
+    }
+
+    Component {
+        id: galleryViewComponent
+        GalleryView { tab: root; currentIndex: root.currentIndex }
+    }
+
+    // What the Columns / Gallery preview shows, for the tests.
+    readonly property string viewPreviewLocation: viewLoader.item && viewLoader.item.previewLocation !== undefined
+                                                  ? viewLoader.item.previewLocation : ""
 
     // Nautilus's Network empty state — without it, an empty network view is
     // indistinguishable from a broken one.

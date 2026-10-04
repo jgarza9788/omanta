@@ -5,6 +5,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 DBus Svg)
+# The quick view plays audio/video and pages through PDFs when these are
+# installed (qt6-multimedia, qt6-webengine on Arch); without them those types
+# fall back to an info card. Off by -DOMANTA_WITH_MEDIA/PDF=OFF.
+option(OMANTA_WITH_MEDIA "Audio/video in the quick view (Qt Multimedia)" ON)
+option(OMANTA_WITH_PDF "PDF pages in the quick view (Qt Pdf)" ON)
+if(OMANTA_WITH_MEDIA)
+    find_package(Qt6 6.5 QUIET COMPONENTS Multimedia)
+endif()
+if(OMANTA_WITH_PDF)
+    find_package(Qt6 6.5 QUIET COMPONENTS Pdf PdfQuick)
+endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
 pkg_check_modules(LIBARCHIVE REQUIRED IMPORTED_TARGET libarchive)
@@ -22,11 +33,15 @@ set(OMANTA_SOURCES
     src/ArchiveEngine.cpp
     src/ArchiveEngine.h
     src/BatchRenamer.cpp
+    src/Checksum.cpp
+    src/Checksum.h
     src/BatchRenamer.h
     src/Clipboard.cpp
     src/Clipboard.h
     src/DBusAdaptors.cpp
     src/DBusAdaptors.h
+    src/DragSource.cpp
+    src/DragSource.h
     src/DirectoryModel.cpp
     src/DirectoryModel.h
     src/DirectoryTreeModel.cpp
@@ -55,6 +70,8 @@ set(OMANTA_SOURCES
     src/Platform.cpp
     src/Platform.h
     src/PlacesModel.cpp
+    src/QuickViewInfo.cpp
+    src/QuickViewInfo.h
     src/PlacesModel.h
     src/SearchModel.cpp
     src/StarredStore.cpp
@@ -78,7 +95,7 @@ set(OMANTA_SOURCES
     src/UserActions.h
 )
 
-set_source_files_properties(qml/Colors.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/Colors.qml qml/DragState.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 set(OMANTA_QML_FILES
     qml/Main.qml
@@ -86,6 +103,14 @@ set(OMANTA_QML_FILES
     qml/TabPanes.qml
     qml/OpsPie.qml
     qml/PathBar.qml
+    qml/FilterBar.qml
+    qml/QuickView.qml
+    qml/PreviewPane.qml
+    qml/ColumnsView.qml
+    qml/GalleryView.qml
+    qml/InfoPanel.qml
+    qml/ChecksumBox.qml
+    qml/Keymap.js
     qml/Sidebar.qml
     qml/FileListView.qml
     qml/FileIconView.qml
@@ -105,7 +130,20 @@ set(OMANTA_QML_FILES
     qml/CredentialDialog.qml
     qml/PropertiesDialog.qml
     qml/Colors.qml
+    qml/DragState.qml
+    qml/FileDropArea.qml
 )
+
+set(OMANTA_OPTIONAL_DEFINITIONS)
+if(Qt6Multimedia_FOUND)
+    list(APPEND OMANTA_QML_FILES qml/QuickViewMedia.qml)
+    list(APPEND OMANTA_OPTIONAL_DEFINITIONS OMANTA_HAVE_MULTIMEDIA)
+endif()
+if(Qt6PdfQuick_FOUND)
+    list(APPEND OMANTA_QML_FILES qml/QuickViewPdf.qml)
+    list(APPEND OMANTA_OPTIONAL_DEFINITIONS OMANTA_HAVE_PDF)
+endif()
+message(STATUS "omanta quick view: media=${Qt6Multimedia_FOUND} pdf=${Qt6PdfQuick_FOUND}")
 
 qt_add_executable(omanta src/main.cpp ${OMANTA_SOURCES})
 qt_add_qml_module(omanta URI Omanta VERSION 1.0 QML_FILES ${OMANTA_QML_FILES})
@@ -113,7 +151,7 @@ qt_add_qml_module(omanta URI Omanta VERSION 1.0 QML_FILES ${OMANTA_QML_FILES})
 # GIO's gdbusintrospection.h declares a struct member named `signals`, which
 # Qt's unprefixed keyword macros turn into a syntax error. Any Qt+GIO project
 # must drop the unprefixed keywords and use Q_SIGNALS/Q_SLOTS/Q_EMIT.
-target_compile_definitions(omanta PRIVATE QT_NO_KEYWORDS)
+target_compile_definitions(omanta PRIVATE QT_NO_KEYWORDS ${OMANTA_OPTIONAL_DEFINITIONS})
 
 # Qt generates a type-registration file that includes each QML_ELEMENT header
 # by bare name (<DirectoryModel.h>), so src/ has to be on the include path or
@@ -131,6 +169,12 @@ set(OMANTA_LIBRARIES
     PkgConfig::LIBARCHIVE
     PkgConfig::TINYSPARQL
 )
+if(Qt6Multimedia_FOUND)
+    list(APPEND OMANTA_LIBRARIES Qt6::Multimedia)
+endif()
+if(Qt6PdfQuick_FOUND)
+    list(APPEND OMANTA_LIBRARIES Qt6::Pdf Qt6::PdfQuick)
+endif()
 
 target_link_libraries(omanta PRIVATE ${OMANTA_LIBRARIES})
 
@@ -144,7 +188,7 @@ if(OMANTA_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.t
     qt_add_qml_module(tst_qmlviews URI Omanta VERSION 1.0
         OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tests/qml/Omanta
         QML_FILES ${OMANTA_QML_FILES})
-    target_compile_definitions(tst_qmlviews PRIVATE QT_NO_KEYWORDS)
+    target_compile_definitions(tst_qmlviews PRIVATE QT_NO_KEYWORDS ${OMANTA_OPTIONAL_DEFINITIONS})
     target_include_directories(tst_qmlviews PRIVATE src)
     target_link_libraries(tst_qmlviews PRIVATE ${OMANTA_LIBRARIES})
     add_subdirectory(tests)

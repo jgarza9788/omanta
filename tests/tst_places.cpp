@@ -24,6 +24,8 @@ private Q_SLOTS:
     void parsesGtkBookmarks();
     void bookmarkEditsAreFollowedLive();
     void findsRowForLocation();
+    void homeReportsFreeSpace();
+    void getReadsARow();
     void trashIconTracksContents();
 
     void addBookmarkWritesTheGtkFile();
@@ -89,6 +91,30 @@ void TestPlaces::placesSectionHasTheFixedEntries()
     QVERIFY(model.rowForLocation(QStringLiteral("recent:///")) >= 0);
     QVERIFY(model.rowForLocation(QStringLiteral("starred:///")) >= 0);
     QVERIFY(model.rowForLocation(QStringLiteral("network:///")) >= 0);
+}
+
+void TestPlaces::homeReportsFreeSpace()
+{
+    PlacesModel model;
+    const QModelIndex home = model.index(model.rowForLocation(QDir::homePath()), 0);
+    QTRY_VERIFY(model.data(home, PlacesModel::TotalBytesRole).toLongLong() > 0);
+    const qint64 free = model.data(home, PlacesModel::FreeBytesRole).toLongLong();
+    QVERIFY(free >= 0);
+    QVERIFY(free <= model.data(home, PlacesModel::TotalBytesRole).toLongLong());
+
+    // Virtual places get no bar.
+    const QModelIndex trash = model.index(model.rowForLocation(QStringLiteral("trash:///")), 0);
+    QCOMPARE(model.data(trash, PlacesModel::TotalBytesRole).toLongLong(), qint64(-1));
+}
+
+void TestPlaces::getReadsARow()
+{
+    PlacesModel model;
+    const QVariantMap home = model.get(model.rowForLocation(QDir::homePath()));
+    QCOMPARE(home.value(QStringLiteral("name")).toString(), QStringLiteral("Home"));
+    QCOMPARE(home.value(QStringLiteral("location")).toString(), QDir::homePath());
+    QVERIFY(model.get(-1).isEmpty());
+    QVERIFY(model.get(model.rowCount()).isEmpty());
 }
 
 void TestPlaces::sectionsAreContiguousAndOrdered()

@@ -9,6 +9,8 @@
 #include <QPointer>
 #include <QUrl>
 
+#include <memory>
+
 namespace {
 
 // GIcon → the comma-joined theme-name list IconImageProvider resolves.
@@ -29,6 +31,11 @@ QString iconUrl(const QString &names)
 {
     return QStringLiteral("image://fileicon/") + names;
 }
+
+struct SpaceCtx {
+    QPointer<PlacesModel> model;
+    QString location;
+};
 
 struct MountCtx {
     QPointer<PlacesModel> model;
@@ -103,6 +110,15 @@ PlacesModel::PlacesModel(QObject *parent)
                                                  G_CALLBACK(&PlacesModel::onTrashEvent), this);
     }
     refreshTrashState();
+
+    // Free space: Home and every mounted device, re-measured on a slow
+    // clock and whenever the Devices section changes (a stick mounted).
+    m_spaceCancellable = g_cancellable_new();
+    m_spaceTimer.setInterval(30000);
+    connect(&m_spaceTimer, &QTimer::timeout, this, &PlacesModel::refreshSpace);
+    m_spaceTimer.start();
+    connect(this, &PlacesModel::countChanged, this, &PlacesModel::refreshSpace);
+    refreshSpace();
 }
 
 PlacesModel::~PlacesModel()
@@ -116,7 +132,78 @@ PlacesModel::~PlacesModel()
         g_file_monitor_cancel(m_trashMonitor);
         g_object_unref(m_trashMonitor);
     }
+    if (m_spaceCancellable) {
+        g_cancellable_cancel(m_spaceCancellable);
+        g_object_unref(m_spaceCancellable);
+    }
     releaseRefs(m_places);
+}
+
+bool PlacesModel::measuresSpace(const Place &place)
+{
+    if (place.location.isEmpty())
+        return false;
+    return place.section == QLatin1String("Devices") || place.location == QDir::homePath();
+}
+
+void PlacesModel::refreshSpace()
+{
+    for (const Place &place : std::as_const(m_places)) {
+        if (!measuresSpace(place))
+            continue;
+        // Async even for local paths: a device row can be a gvfs mount whose
+        // server has gone quiet, and the sidebar must never wait on it.
+        GFile *file = Location::make(place.location);
+        g_file_query_filesystem_info_async(
+            file, G_FILE_ATTRIBUTE_FILESYSTEM_FREE "," G_FILE_ATTRIBUTE_FILESYSTEM_SIZE,
+            G_PRIORITY_LOW, m_spaceCancellable, &PlacesModel::onSpaceReady,
+            new SpaceCtx{ this, place.location });
+        g_object_unref(file);
+    }
+}
+
+void PlacesModel::onSpaceReady(GObject *source, GAsyncResult *res, gpointer data)
+{
+    std::unique_ptr<SpaceCtx> ctx(static_cast<SpaceCtx *>(data));
+    GError *error = nullptr;
+    GFileInfo *info = g_file_query_filesystem_info_finish(G_FILE(source), res, &error);
+    g_clear_error(&error);
+    if (!ctx->model) {
+        g_clear_object(&info);
+        return;
+    }
+    Space space;
+    if (info) {
+        if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+            space.free = qint64(g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE));
+        if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE))
+            space.total = qint64(g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE));
+        g_object_unref(info);
+    }
+    ctx->model->applySpace(ctx->location, space);
+}
+
+void PlacesModel::applySpace(const QString &location, Space space)
+{
+    const Space old = m_space.value(location);
+    if (old.free == space.free && old.total == space.total)
+        return;
+    m_space.insert(location, space);
+    for (int row = 0; row < m_places.size(); ++row) {
+        if (m_places.at(row).location == location)
+            Q_EMIT dataChanged(index(row), index(row), { FreeBytesRole, TotalBytesRole });
+    }
+}
+
+QVariantMap PlacesModel::get(int row) const
+{
+    if (row < 0 || row >= m_places.size())
+        return {};
+    const Place &place = m_places.at(row);
+    return { { QStringLiteral("name"), place.name },
+             { QStringLiteral("location"), place.location },
+             { QStringLiteral("section"), place.section },
+             { QStringLiteral("mountable"), place.mountable } };
 }
 
 void PlacesModel::releaseRefs(QList<Place> &places)
@@ -145,6 +232,8 @@ QVariant PlacesModel::data(const QModelIndex &index, int role) const
     case SectionRole: return place.section;
     case MountableRole: return place.mountable;
     case EjectableRole: return place.ejectable;
+    case FreeBytesRole: return m_space.value(place.location).free;
+    case TotalBytesRole: return m_space.value(place.location).total;
     }
     return {};
 }
@@ -158,6 +247,8 @@ QHash<int, QByteArray> PlacesModel::roleNames() const
         { SectionRole, "section" },
         { MountableRole, "mountable" },
         { EjectableRole, "ejectable" },
+        { FreeBytesRole, "freeBytes" },
+        { TotalBytesRole, "totalBytes" },
     };
 }
 

@@ -30,6 +30,9 @@ private Q_SLOTS:
     void dateRangeIsASinceWindow();
     void dateFilterRejectsMissingTimestamps();
     void changingAFilterRerunsTheSearch();
+    void regexModeMatchesPatterns();
+    void globQueryMatchesWholeNames();
+    void invalidRegexReportsAReason();
 
 private:
     void write(const QString &relPath);
@@ -273,6 +276,46 @@ void TestSearch::changingAFilterRerunsTheSearch()
     QTRY_VERIFY_WITH_TIMEOUT(!model.searching() && model.count() == 1, 10000);
     QCOMPARE(model.data(model.index(0), DirectoryModel::NameRole).toString(),
              QStringLiteral("pic.jpg"));
+}
+
+void TestSearch::regexModeMatchesPatterns()
+{
+    SearchModel model;
+    model.setRootLocation(m_dir.path());
+    model.setMatchMode(QStringLiteral("regex"));
+    model.setQuery(QStringLiteral("^alpha\\.(txt|md)$"));
+
+    // alpha.txt and ALPHA.md (smart case: lower-case pattern ignores case),
+    // not alpha_two.txt.
+    QTRY_VERIFY_WITH_TIMEOUT(!model.searching() && model.count() > 0, 10000);
+    QCOMPARE(model.count(), 2);
+}
+
+void TestSearch::globQueryMatchesWholeNames()
+{
+    SearchModel model;
+    model.setRootLocation(m_dir.path());
+    model.setQuery(QStringLiteral("*.md"));
+
+    QTRY_VERIFY_WITH_TIMEOUT(!model.searching() && model.count() > 0, 10000);
+    QCOMPARE(model.count(), 1);
+}
+
+void TestSearch::invalidRegexReportsAReason()
+{
+    SearchModel model;
+    model.setRootLocation(m_dir.path());
+    model.setQuery(QStringLiteral("re:(alpha"));
+
+    QTRY_VERIFY_WITH_TIMEOUT(!model.unavailableReason().isEmpty(), 10000);
+    QVERIFY(model.unavailableReason().startsWith(QStringLiteral("Invalid pattern")));
+    QCOMPARE(model.count(), 0);
+    QVERIFY(!model.searching());
+
+    // Fixing the pattern clears the complaint and searches again.
+    model.setQuery(QStringLiteral("re:(alpha)"));
+    QTRY_VERIFY_WITH_TIMEOUT(!model.searching() && model.count() > 0, 10000);
+    QVERIFY(model.unavailableReason().isEmpty());
 }
 
 void TestSearch::filtersRestartAnEmptySearch()

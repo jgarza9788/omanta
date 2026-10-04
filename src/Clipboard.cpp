@@ -117,6 +117,12 @@ void Clipboard::copyText(const QString &text)
     QGuiApplication::clipboard()->setText(text);
 }
 
+QString Clipboard::text() const
+{
+    const QClipboard *clipboard = QGuiApplication::clipboard();
+    return clipboard ? clipboard->text().left(4096) : QString();
+}
+
 void Clipboard::clear()
 {
     if (auto *clipboard = QGuiApplication::clipboard())

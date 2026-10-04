@@ -15,8 +15,22 @@ Omarchy theme.
 
 ## What you get
 
-- List and grid views, tabs, split view (F3), tree expansion, breadcrumbs +
-  Ctrl+L, type-ahead, configurable columns
+- Keyboard-first, Omarchy-plugin style: `h` `j` `k` `l` to move, `g`/`G`
+  for the ends, `/` to filter, `?` for every key (also linked from the
+  status line), and Esc backing out one layer at a time (see [Keys](#keys)).
+  Preferences → Keys switches back to Nautilus-style type-ahead.
+- Four views (Ctrl+1–4, or the toolbar button to cycle):
+  - **List** with configurable columns and optional tree expansion
+  - **Grid**
+  - **Columns**, Finder-style: one column per folder along the path,
+    scrolling sideways as you go deeper, with a preview column at the end;
+    `h`/`l` (←/→) go back up / into a folder
+  - **Gallery**: the current item large on top, a thumbnail strip below that
+    `h`/`l` step through
+- Tabs, split view (F3) with F5/F6 to copy/move across, breadcrumbs + Ctrl+L.
+  Going up a folder selects the one you came from
+- Reopens your last windows, tabs and split panes on a plain launch
+  (Preferences → Reopen Windows and Tabs at Launch)
 - Adjustable icon sizes in both views: Ctrl++ / Ctrl+- to resize, Ctrl+0
   to reset, or use View Options → Icon Size. List and grid each keep their
   own size, shared by every window and remembered after a restart.
@@ -34,15 +48,39 @@ Omarchy theme.
   sidebar button slides it back over the files.
 - Hidden files: Ctrl+H or Preferences → Show Hidden Files, remembered
   after a restart
-- Quick preview: Space (or right-click → Preview) shows the selected file in
-  Sushi, the previewer stock Omarchy ships — zoomable images, text,
-  Markdown, PDF, audio, video, and office files when LibreOffice is
-  installed. Arrow keys step through the folder; Space or Escape closes it
+- Quick view: Space (or right-click → Preview) previews the selected item
+  inside the window — nothing to launch, so the next file is one keypress
+  away. Images (zoom with +/-/0), text with line numbers, rendered
+  Markdown (`m` for the source; images and HTML in it are never loaded),
+  folder contents and size, archive listings, PDF pages, and audio/video
+  with a seek bar. `j`/`k` (or the arrows) step through the folder,
+  Enter opens, Space or Esc closes. `p` shrinks it to a picture-in-picture
+  card in the corner: the files keep the keys and the card follows the
+  selection (`P` or a double-click brings it back full size). Sushi is still available under
+  Preferences → Space Previews With
+- Info panel (F11, or `i`): preview, type, size (a folder's real total),
+  dimensions, permissions, owner, and on-demand SHA-256/SHA-1/MD5 with a
+  "compare with clipboard" check — the same checksum is in Properties
+- Free space: a usage bar under Home and each drive in the sidebar
+  (red past 90%), and "N GB free" on the status line
 - Open With: right-click a file to open it in any app registered for its
   type, or "Other Application…" to choose one and set the default
 - New Folder from the + button beside search, Ctrl+Shift+N, or right-click
 - Search: recursive filename plus full-text (via `localsearch`), date and
-  type filters
+  type filters. Names match as plain text, as a glob when the query has
+  `*` `?` `[` (`*.jpg`, `IMG_????.*`), or as a regular expression after
+  `re:` or with the `.*` toggle (Alt+R) — smart case: an upper-case letter
+  in the pattern makes it case-sensitive
+- Filter (`/`, or Ctrl+Shift+S): narrows the current folder as you type,
+  same text/glob/regex rules; select by pattern with `*` or Ctrl+S
+- Duplicate (Ctrl+Shift+D, or `Y`): "name (copy)" beside the original
+- Drag and drop that tells you what it will do: a label beside the pointer
+  reads "Move to …", "Copy to …" or "Link in …" and changes as you press
+  Ctrl (copy), Shift (move) or Ctrl+Shift / Alt (link); with no key it moves
+  within a drive and copies across drives
+- Spring-loaded folders: rest a drag on a folder, a sidebar place or a tab
+  and it opens, so you can keep digging (Preferences → Open Folders While
+  Dragging: 3 s by default, 1.5 s, ¾ s or never)
 - Compress/extract (zip, tar.xz, 7z, encrypted zip), "Extract to…"
 - Omarchy theming end to end — follows your active theme live, not just
   light/dark
@@ -56,6 +94,44 @@ Completed work from a failed or cancelled copy/move remains undoable when it
 has not replaced existing files. These partial batches cannot be redone.
 Extraction Undo preserves later additions, edits, and replacement files by
 refusing to remove an output that has changed.
+
+## Keys
+
+Vim keys are on by default; `?` lists them all in the app. The short
+version:
+
+| Key | |
+|---|---|
+| `j` `k` / arrows | move |
+| `h` `l` | parent / open (list view); left / right (grid) |
+| `-` / Backspace, `~` | parent folder, home |
+| `g` / `G` | first / last item |
+| `J` `K` | extend the selection |
+| `v` / `V` | toggle selection / select all |
+| `/` | filter this folder — Enter keeps it, Esc clears it |
+| `*` | select by pattern |
+| `f` | search below this folder |
+| Space | quick view (`p` inside it: picture-in-picture) |
+| `i` | info panel |
+| `y` `x` `p` | copy, cut, paste |
+| `Y` | duplicate |
+| `c` / `m` | copy / move to the other pane (split view) |
+| `r` | rename |
+| `a` | new folder |
+| `D` | move to trash |
+| `u` / `U` | undo / redo |
+| `o` | actions menu |
+| Ctrl+1 – 4 | list / grid / columns / gallery |
+| `.` | hidden files |
+| `s` | cycle sort: name › modified › size › type |
+| `1`–`9` | jump to sidebar place N |
+| `b` | browse the sidebar (`j`/`k`, Enter, Esc) |
+| `t` / `q` | new tab / close tab |
+| Tab | other pane |
+| `?` | every key |
+
+Every Ctrl/Alt/F-key shortcut works in both modes. Split view: F5 copies
+and F6 moves the selection into the other pane; Ctrl+F6 switches panes.
 
 ## Install
 
@@ -133,8 +209,11 @@ sudo pacman -R omanta
 ## Requirements
 
 Arch with Omarchy. Dependencies (`qt6-base`, `qt6-declarative`, `glib2`,
-`gvfs`, `libarchive`, `tinysparql`) are all in Omarchy's default install or
-pulled automatically. Optional: `gvfs-smb`/`gvfs-mtp`/`gvfs-gphoto2` for
+`gvfs`, `libarchive`, `tinysparql`, `qt6-multimedia`, `qt6-webengine`) are
+all in Omarchy's default install or pulled automatically. The last two give
+the quick view audio/video and PDF pages; build with
+`-DOMANTA_WITH_MEDIA=OFF` / `-DOMANTA_WITH_PDF=OFF` to leave either out, and
+those types fall back to an info card. Optional: `gvfs-smb`/`gvfs-mtp`/`gvfs-gphoto2` for
 network shares, phones and cameras, `ffmpegthumbnailer` for video
 thumbnails, `localsearch` for full-text search.
 

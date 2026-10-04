@@ -5,14 +5,20 @@ import Omanta.Runtime
 // A native file drag with a bounded preview, independent of row/cell geometry.
 // The transparent parent keeps the card out of the view; grabToImage on the
 // card renders its own contents without inheriting the parent's opacity.
+//
+// The drag itself runs in DragSource, which outlives this item: a delegate
+// can be destroyed mid-drag (a spring-loaded folder opening rebuilds the
+// list), and a drag owned here took its data down with it.
 Item {
     id: root
 
     required property bool pressed
     required property bool dragging
 
-    property var mimeData: ({})
+    property var paths: []
     property var grabResult: null
+    // DragSource's token for the drag this item started; 0 when none.
+    property int token: 0
     property bool ready: false
     property bool capturePending: false
     property int generation: 0
@@ -20,17 +26,35 @@ Item {
     property string fileName: ""
     property url previewSource: ""
     property url fallbackSource: ""
-    readonly property url previewUrl: grabResult ? grabResult.url : ""
-
     opacity: 0
 
-    Drag.dragType: Drag.Automatic
-    Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
-    Drag.active: dragging && ready
-    Drag.hotSpot: Qt.point(28, 28)
-    Drag.mimeData: root.mimeData
-    Drag.imageSource: root.previewUrl
-    Drag.onDragFinished: reset()
+    // Start once the gesture is a drag and the preview card is captured —
+    // checked on either change, not bound: the start writes `token`, and a
+    // binding over `token` would loop.
+    function maybeStart() {
+        if (!dragging || !ready || token !== 0)
+            return;
+        // The window draws the card (DragState); the native picture is
+        // left blank so there is only ever one label.
+        DragState.cardText = label.text;
+        DragState.cardIcon = preview.status === Image.Ready ? root.previewSource : root.fallbackSource;
+        DragState.cardHotSpot = Qt.point(28, 28);
+        DragState.ownDrag = true;
+        token = DragSource.start(paths, Qt.point(28, 28));
+        if (token === 0)
+            DragState.ownDrag = false; // another drag is still running
+    }
+    onReadyChanged: maybeStart()
+
+    Connections {
+        target: DragSource
+        function onFinished(finishedToken, action) {
+            if (finishedToken === root.token) {
+                DragState.ownDrag = false;
+                root.reset();
+            }
+        }
+    }
 
     function reset() {
         ++generation;
@@ -38,11 +62,12 @@ Item {
         captureTimeout.stop();
         ready = false;
         grabResult = null;
+        token = 0;
     }
 
     function prepare(paths, name, source, fallback) {
         reset();
-        mimeData = { "text/uri-list": Platform.uriList(paths) };
+        root.paths = paths;
         itemCount = paths.length;
         fileName = name;
         fallbackSource = fallback;
@@ -84,8 +109,15 @@ Item {
         captureTimeout.stop();
     }
 
-    onPressedChanged: if (!pressed && !dragging) reset()
-    onDraggingChanged: if (!pressed && !dragging) reset()
+    // A drag in flight finishes through DragSource; only an unstarted one
+    // is dropped when the press ends.
+    onPressedChanged: if (!pressed && !dragging && token === 0) reset()
+    onDraggingChanged: {
+        if (!pressed && !dragging && token === 0)
+            reset();
+        else
+            maybeStart();
+    }
 
     // Deferred to the next event-loop pass, like Qt.callLater, but owned by
     // this item: a view left right after a press tears the delegate down,

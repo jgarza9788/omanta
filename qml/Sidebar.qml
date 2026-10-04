@@ -26,6 +26,34 @@ Rectangle {
     // The operations popover closed; the window hands the keyboard back —
     // the same contract every dialog honours (see the Phase 3 findings).
     signal opsPopoverClosed()
+    // Keyboard browsing (vim `b`) ended — the window hands the keys back.
+    signal keyboardReleased()
+
+    readonly property bool keyboardActive: list.activeFocus
+
+    // Vim `b`: the places list takes the keys, starting on the current place.
+    function focusPlaces() {
+        const row = places.rowForLocation(root.currentLocation);
+        list.currentIndex = row >= 0 ? row : 0;
+        list.forceActiveFocus();
+    }
+
+    // What a click does, by row index — navigate, or mount first.
+    function activateRow(row) {
+        const place = places.get(row);
+        if (!place.name)
+            return;
+        if (place.location !== "")
+            root.navigateRequested(place.location);
+        else if (place.mountable)
+            places.mount(row);
+    }
+
+    // Vim 1–9: the Nth row, counted down the sidebar as drawn.
+    function activatePlace(number) {
+        if (number >= 1 && number <= places.count)
+            activateRow(number - 1);
+    }
 
     function isBookmarked(location) {
         return places.isBookmarked(location);
@@ -74,6 +102,29 @@ Rectangle {
         clip: true
         model: places
         boundsBehavior: Flickable.StopAtBounds
+        keyNavigationEnabled: false
+        highlightFollowsCurrentItem: false
+
+        Keys.onPressed: event => {
+            const step = d => {
+                list.currentIndex = Math.max(0, Math.min(list.count - 1, list.currentIndex + d));
+                list.positionViewAtIndex(list.currentIndex, ListView.Contain);
+            };
+            if (event.key === Qt.Key_J || event.key === Qt.Key_Down) step(1);
+            else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) step(-1);
+            else if (event.key === Qt.Key_G)
+                step((event.modifiers & Qt.ShiftModifier) ? list.count : -list.count);
+            else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                     || event.key === Qt.Key_L || event.key === Qt.Key_Right) {
+                root.activateRow(list.currentIndex);
+                root.keyboardReleased();
+            } else if (event.key === Qt.Key_Escape || event.key === Qt.Key_H
+                       || event.key === Qt.Key_Left || event.key === Qt.Key_B)
+                root.keyboardReleased();
+            else
+                return;
+            event.accepted = true;
+        }
 
         // Nautilus draws no section headers — just a hairline between the
         // fixed places, the bookmarks and the devices. Same here.
@@ -104,6 +155,9 @@ Rectangle {
             required property string section
             required property bool mountable
             required property bool ejectable
+            required property real freeBytes
+            required property real totalBytes
+            readonly property real usedFraction: totalBytes > 0 ? 1 - freeBytes / totalBytes : 0
 
             readonly property bool current: location !== "" && location === root.currentLocation
             // Recent is read-only and Network is not a folder; everywhere
@@ -121,18 +175,21 @@ Rectangle {
             color: current ? Colors.selection
                  : rowDrop.containsDrag ? Colors.hover
                  : rowMouse.containsMouse ? Colors.hover : "transparent"
-            border.color: rowDrop.containsDrag ? Colors.accent : "transparent"
-            border.width: rowDrop.containsDrag ? 1 : 0
+            readonly property bool keyCursor: list.activeFocus && list.currentIndex === index
+            border.color: rowDrop.containsDrag || keyCursor ? Colors.accent : "transparent"
+            border.width: rowDrop.containsDrag || keyCursor ? 1 : 0
 
-            DropArea {
+            FileDropArea {
                 id: rowDrop
 
                 anchors.fill: parent
                 enabled: row.droppable
-                onDropped: drop => {
-                    root.dropRequested(drop.urls, row.location);
-                    drop.accept();
-                }
+                destination: row.location
+                // Hold over a place and it opens, to keep digging into it.
+                // Trash and Starred have nothing to dig into.
+                springLoaded: row.location !== "trash:///" && row.location !== "starred:///"
+                onFilesDropped: urls => root.dropRequested(urls, row.location)
+                onSprung: root.navigateRequested(row.location)
             }
 
             Image {
@@ -157,7 +214,7 @@ Rectangle {
                 text: row.name
                 color: row.current ? Colors.selectionText : row.mountable ? Colors.textDim : Colors.text
                 font.pixelSize: 13
-                elide: Text.ElideRight
+                elide: Text.ElideMiddle
             }
 
             Text {
@@ -180,6 +237,35 @@ Rectangle {
                     onClicked: places.eject(row.index)
                 }
             }
+
+            // Disk usage under Home and the devices: a hairline meter that
+            // turns to the error colour past 90% full.
+            Rectangle {
+                id: usageTrack
+                visible: row.totalBytes > 0
+                anchors.left: icon.right
+                anchors.leftMargin: 8
+                anchors.right: ejectButton.visible ? ejectButton.left : parent.right
+                anchors.rightMargin: 8
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 3
+                height: 2
+                radius: 1
+                color: Colors.border
+
+                Rectangle {
+                    width: parent.width * Math.max(0, Math.min(1, row.usedFraction))
+                    height: parent.height
+                    radius: 1
+                    color: row.usedFraction > 0.9 ? Colors.error
+                         : row.current ? Colors.selectionText : Colors.accent
+                }
+            }
+
+            ToolTip.visible: rowMouse.containsMouse && row.totalBytes > 0
+            ToolTip.delay: 600
+            ToolTip.text: qsTr("%1 free of %2").arg(Platform.formatSize(row.freeBytes))
+                                                 .arg(Platform.formatSize(row.totalBytes))
 
             MouseArea {
                 id: rowMouse

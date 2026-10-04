@@ -8,6 +8,7 @@
 #include "DBusAdaptors.h"
 #include "IconImageProvider.h"
 #include "Platform.h"
+#include "Settings.h"
 #include "SystemTheme.h"
 #include "ThumbnailProvider.h"
 
@@ -192,10 +193,18 @@ int main(int argc, char *argv[])
 
     // Windows are created rather than loaded, so the same code path serves the
     // first launch and every later D-Bus request.
-    if (!selectPath.isEmpty())
+    application.setSessionSaving(true);
+    if (!selectPath.isEmpty()) {
         application.showItems({ selectPath });
-    else if (!service || !paths.isEmpty())
-        application.openPaths(paths, parser.isSet(newWindowOption));
+    } else if (!service || !paths.isEmpty()) {
+        // A plain launch (the launcher's --new-window included) comes back
+        // to the last session; anything naming a place goes there instead.
+        const Settings settings;
+        const bool restored = paths.isEmpty() && settings.restoreSession()
+                              && application.restoreSession(settings.sessionState());
+        if (!restored)
+            application.openPaths(paths, parser.isSet(newWindowOption));
+    }
 
     if (service) {
         // The bus delivers the request that activated us as soon as the name
