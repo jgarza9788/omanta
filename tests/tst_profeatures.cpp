@@ -1,4 +1,5 @@
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
 #include <QProcess>
@@ -51,6 +52,7 @@ private Q_SLOTS:
     void savedSearchesRoundTrip();
     void pathCompletionCompletesFolders();
     void verifyCatchesAMismatch();
+    void operationQueuePausesReordersAndThrottles();
     void settingsMarksAndProColumns();
 
 private:
@@ -618,6 +620,68 @@ void TestProFeatures::verifyCatchesAMismatch()
     QTRY_COMPARE(verified.count(), 1);
     QCOMPARE(verified.first().at(0).toInt(), 2);
     QVERIFY(verified.first().at(1).toStringList().isEmpty());
+}
+
+// The queue: a speed limit keeps a copy running long enough to queue behind
+// it, waiting jobs reorder (the running one never moves), and a pause holds
+// everything until it's lifted.
+void TestProFeatures::operationQueuePausesReordersAndThrottles()
+{
+    TempTree tree;
+    const QString big = tree.writeFile("big.bin", 2 * 1024 * 1024);
+    QVERIFY(QFile::setPermissions(big, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup));
+    const QString one = tree.writeFile("one.txt");
+    const QString two = tree.writeFile("two.txt");
+    const QString target = tree.makeDir("target");
+
+    FileOperations operations;
+    QSignalSpy finished(&operations, &FileOperations::operationFinished);
+    operations.setSpeedLimit(1024 * 1024);
+    QCOMPARE(operations.speedLimit(), qint64(1024 * 1024));
+    operations.copy({ big }, target);
+    operations.copy({ one }, target);
+    operations.copy({ two }, target);
+
+    auto row = [&](int i) { return operations.operations().at(i).toMap(); };
+    QCOMPARE(operations.operations().size(), 3);
+    QCOMPARE(row(0).value("state").toString(), QStringLiteral("running"));
+    QCOMPARE(row(1).value("state").toString(), QStringLiteral("queued"));
+    QCOMPARE(row(2).value("state").toString(), QStringLiteral("queued"));
+
+    // Unthrottled, 2 MB on a local disk takes milliseconds.
+    QTest::qWait(400);
+    QCOMPARE(finished.count(), 0);
+
+    const double runningId = row(0).value("id").toDouble();
+    const double twoId = row(2).value("id").toDouble();
+    operations.moveOperation(twoId, -1);
+    QCOMPARE(row(1).value("id").toDouble(), twoId);
+    operations.moveOperation(twoId, -1); // already first in line
+    QCOMPARE(row(0).value("id").toDouble(), runningId);
+    QCOMPARE(row(1).value("id").toDouble(), twoId);
+    operations.moveOperation(runningId, +1); // the running job isn't queued
+    QCOMPARE(row(0).value("id").toDouble(), runningId);
+
+    QSignalSpy pausedChanged(&operations, &FileOperations::pausedChanged);
+    operations.setPaused(true);
+    QCOMPARE(pausedChanged.count(), 1);
+    QCOMPARE(row(0).value("state").toString(), QStringLiteral("paused"));
+    QTest::qWait(2500); // longer than the whole copy takes at the limit
+    QCOMPARE(finished.count(), 0);
+    QVERIFY(!QFileInfo::exists(QDir(target).filePath("one.txt")));
+
+    operations.setSpeedLimit(0);
+    operations.setPaused(false);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 3, 10000);
+    QCOMPARE(operations.lastError(), QString());
+    QVERIFY(finished.at(0).at(0).toString().contains("big.bin"));
+    QVERIFY(finished.at(1).at(0).toString().contains("two.txt"));
+    QVERIFY(finished.at(2).at(0).toString().contains("one.txt"));
+    // The chunked, throttled copy keeps the contents and metadata whole.
+    const QString copied = QDir(target).filePath("big.bin");
+    QCOMPARE(FileOperations::mismatchedCopies({ { big, copied } }), QStringList());
+    QCOMPARE(QFile::permissions(copied), QFile::permissions(big));
+    QVERIFY(operations.operations().isEmpty());
 }
 
 void TestProFeatures::settingsMarksAndProColumns()

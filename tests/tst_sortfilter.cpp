@@ -2,7 +2,24 @@
 #include "FileSortFilterModel.h"
 #include "TestFixture.h"
 
+#include <QHash>
+#include <QSignalSpy>
 #include <QTest>
+
+// Stands in for MediaInfo: a sortValue per path, and changed() when more
+// values arrive.
+class FakeExtraSource : public QObject
+{
+    Q_OBJECT
+public:
+    QHash<QString, QVariant> values;
+    Q_INVOKABLE QVariant sortValue(const QString &path, const QString &field) const
+    {
+        return field == QLatin1String("length") ? values.value(path) : QVariant();
+    }
+Q_SIGNALS:
+    void changed();
+};
 
 // Ordering and visibility. These are the rules a user notices instantly when
 // they are wrong — "file10 before file9" reads as broken even though nothing
@@ -35,6 +52,8 @@ private Q_SLOTS:
     void proxyRowForNameRoundTrips();
     void findByPrefixWrapsAround();
     void valueAtReadsNamedRoles();
+    void hiddenNamesPropertyFiltersRows();
+    void extraSourceSortsUnknownLast();
 
 private:
     // Visible names in proxy order — the order the user actually sees.
@@ -535,6 +554,63 @@ void TestSortFilter::valueAtReadsNamedRoles()
     // than something that silently reads as an empty string.
     QVERIFY(!proxy.valueAt(0, QStringLiteral("nosuchrole")).isValid());
     QVERIFY(!proxy.valueAt(99, QStringLiteral("name")).isValid());
+}
+
+// Pro "hide ignored": the names GitStatus reports drop out of the listing,
+// and come back when the list clears.
+void TestSortFilter::hiddenNamesPropertyFiltersRows()
+{
+    TempTree tree;
+    tree.writeFile("keep.txt");
+    tree.writeFile("debug.log");
+    tree.makeDir("build");
+
+    DirectoryModel model;
+    FileSortFilterModel proxy;
+    proxy.setSourceModel(&model);
+    model.setPath(tree.path());
+    QTRY_COMPARE(proxy.count(), 3);
+
+    QSignalSpy changed(&proxy, &FileSortFilterModel::hiddenNamesChanged);
+    proxy.setHiddenNames({ "debug.log", "build" });
+    QCOMPARE(changed.count(), 1);
+    QCOMPARE(visible(proxy), (QStringList{ "keep.txt" }));
+    QCOMPARE(proxy.count(), 1);
+    proxy.setHiddenNames({ "build", "debug.log" }); // same set: no signal
+    QCOMPARE(changed.count(), 1);
+    proxy.setHiddenNames({});
+    QCOMPARE(visible(proxy), (QStringList{ "build", "debug.log", "keep.txt" }));
+}
+
+// Pro media columns: rows order by the extra source's values, unknown ones
+// last either way, and a changed() re-sorts.
+void TestSortFilter::extraSourceSortsUnknownLast()
+{
+    TempTree tree;
+    tree.writeFile("a.mp3");
+    tree.writeFile("b.mp3");
+    tree.writeFile("c.txt");
+
+    DirectoryModel model;
+    FileSortFilterModel proxy;
+    FakeExtraSource source;
+    source.values.insert(tree.filePath("a.mp3"), 300);
+    source.values.insert(tree.filePath("b.mp3"), 100);
+    proxy.setSourceModel(&model);
+    model.setPath(tree.path());
+    QTRY_COMPARE(proxy.count(), 3);
+
+    proxy.setExtraSource(&source);
+    proxy.setExtraSortField("length");
+    proxy.setSortKey(FileSortFilterModel::ByExtra);
+    QCOMPARE(visible(proxy), (QStringList{ "b.mp3", "a.mp3", "c.txt" }));
+    proxy.setSortDescending(true);
+    QCOMPARE(visible(proxy), (QStringList{ "a.mp3", "b.mp3", "c.txt" }));
+
+    proxy.setSortDescending(false);
+    source.values.insert(tree.filePath("a.mp3"), 50);
+    Q_EMIT source.changed();
+    QTRY_COMPARE(visible(proxy), (QStringList{ "a.mp3", "b.mp3", "c.txt" }));
 }
 
 QTEST_GUILESS_MAIN(TestSortFilter)

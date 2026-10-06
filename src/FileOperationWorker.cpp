@@ -133,6 +133,51 @@ void onCopyProgress(goffset current, goffset, gpointer data)
                                    ctx->currentName);
 }
 
+// A regular file copied a chunk at a time, reporting progress after each one.
+// g_file_copy hands a local file to copy_file_range (or a reflink) whole and
+// reports progress once, at the end, so the speed limit and pause would have
+// nothing to act on; this is used only while a limit is set.
+bool copyFileInChunks(GFile *source, GFile *payload, goffset total, GCancellable *cancel,
+                      GFileProgressCallback progress, gpointer progressData, GError **error)
+{
+    GFileInputStream *in = g_file_read(source, cancel, error);
+    if (!in)
+        return false;
+    GFileOutputStream *out = g_file_create(payload, G_FILE_CREATE_PRIVATE, cancel, error);
+    if (!out) {
+        g_object_unref(in);
+        return false;
+    }
+    QByteArray buffer(256 * 1024, Qt::Uninitialized);
+    goffset current = 0;
+    bool ok = true;
+    for (;;) {
+        const gssize read = g_input_stream_read(G_INPUT_STREAM(in), buffer.data(), buffer.size(),
+                                                cancel, error);
+        if (read < 0) {
+            ok = false;
+            break;
+        }
+        if (read == 0)
+            break;
+        if (!g_output_stream_write_all(G_OUTPUT_STREAM(out), buffer.constData(), gsize(read),
+                                       nullptr, cancel, error)) {
+            ok = false;
+            break;
+        }
+        current += read;
+        if (progress)
+            progress(current, total, progressData);
+    }
+    // Close even after a failure; only the first error is reported.
+    ok = g_output_stream_close(G_OUTPUT_STREAM(out), cancel, ok ? error : nullptr) && ok;
+    g_input_stream_close(G_INPUT_STREAM(in), nullptr, nullptr);
+    g_object_unref(out);
+    g_object_unref(in);
+    // Same metadata g_file_copy would carry (size is the payload's own).
+    return ok && copyDirectoryMetadata(source, payload, cancel, error);
+}
+
 // Finish the payload before touching its final name. A failed/cancelled copy
 // must not publish a truncated file or destroy an existing destination.
 bool copyStaged(GFile *source, GFile *destination, bool replace, GCancellable *cancel,
@@ -154,8 +199,19 @@ bool copyStaged(GFile *source, GFile *destination, bool replace, GCancellable *c
     GFile *payload = g_file_get_child(staging, "payload");
     bool ok = setDirectoryMode(staging, 0700, cancel, error);
     if (ok) {
-        const auto flags = GFileCopyFlags(G_FILE_COPY_ALL_METADATA | G_FILE_COPY_NOFOLLOW_SYMLINKS);
-        ok = g_file_copy(source, payload, flags, cancel, progress, progressData, error);
+        GFileInfo *info = FileOperationWorker::bytesPerSecond().load() > 0
+            ? g_file_query_info(source, G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_STANDARD_SIZE,
+                                G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, nullptr)
+            : nullptr;
+        if (info && g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR) {
+            ok = copyFileInChunks(source, payload, g_file_info_get_size(info), cancel,
+                                  progress, progressData, error);
+        } else {
+            const auto flags = GFileCopyFlags(G_FILE_COPY_ALL_METADATA | G_FILE_COPY_NOFOLLOW_SYMLINKS);
+            ok = g_file_copy(source, payload, flags, cancel, progress, progressData, error);
+        }
+        if (info)
+            g_object_unref(info);
     }
     if (ok) {
         const auto flags = GFileCopyFlags(G_FILE_COPY_NOFOLLOW_SYMLINKS | G_FILE_COPY_NO_FALLBACK_FOR_MOVE
