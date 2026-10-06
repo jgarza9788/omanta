@@ -20,7 +20,8 @@ QtObject {
     property Item area: null
     property var paths: []
     property string destination: ""
-    // "copy" | "move" | "link" | "trash" | "star" — what a drop does.
+    // "copy" | "move" | "link" | "trash" | "star" | "bookmark" — what a drop
+    // does.
     property string action: ""
     // Scene position of the pointer, and the window it is in.
     property real x: 0
@@ -46,6 +47,7 @@ QtObject {
         case "link": return qsTr("Link");
         case "trash": return qsTr("Trash");
         case "star": return qsTr("Star");
+        case "bookmark": return qsTr("Bookmark");
         }
         return "";
     }
@@ -57,17 +59,23 @@ QtObject {
         case "link": return "↗  " + qsTr("Link in %1").arg(where);
         case "trash": return "→  " + qsTr("Move to Trash");
         case "star": return "★  " + qsTr("Star");
+        case "bookmark": return "+  " + (paths.length === 1
+                                         ? qsTr("Bookmark “%1”").arg(Platform.baseName(paths[0]))
+                                         : qsTr("Bookmark %1 folders").arg(paths.length));
         }
         return "";
     }
 
     // The action for these sources landing in `target`, from the keys held
-    // now. Trash and Starred have one meaning each.
+    // now. Trash, Starred and the sidebar's New Bookmark row ("bookmark:")
+    // have one meaning each.
     function actionFor(sources, target) {
         if (target === "trash:///")
             return "trash";
         if (target === "starred:///")
             return "star";
+        if (target === "bookmark:")
+            return "bookmark";
         if (sources.length === 0 || !target)
             return "";
         const mods = Platform.keyboardModifiers();
@@ -80,6 +88,14 @@ QtObject {
         if (shift)
             return "move";
         return Platform.sameFilesystem(sources[0], target) ? "move" : "copy";
+    }
+
+    // A drop that would do nothing: a folder into itself, or things back into
+    // the folder they are in. Trash and Starred are never the parent.
+    function isNoop(sources, target) {
+        return sources.length > 0
+               && (sources.indexOf(target) >= 0
+                   || sources.every(p => Platform.parentPath(p) === target));
     }
 
     function hover(dropArea, urls, target, sceneX, sceneY, win) {
@@ -105,12 +121,11 @@ QtObject {
     function refresh() {
         if (!area)
             return;
-        // A drop into the folder something already lives in is no move at
-        // all; say nothing rather than promise one.
-        const next = actionFor(paths, destination);
-        const noop = (next === "move" || next === "") && paths.length > 0
-                     && paths.every(p => Platform.parentPath(p) === destination);
-        action = noop || paths.indexOf(destination) >= 0 ? "" : next;
+        // Letting go in the folder things came from is a drag abandoned, not
+        // a request, whatever key is held (Ctrl used to make a "name (copy)"
+        // beside the original; a duplicate is Ctrl+C, Ctrl+V). Say nothing
+        // rather than promise one; Tab.requestDrop refuses it the same way.
+        action = isNoop(paths, destination) ? "" : actionFor(paths, destination);
     }
 
     // Keys can change while the pointer rests; a dead area (its delegate

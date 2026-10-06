@@ -530,8 +530,9 @@ FocusScope {
         const paths = Platform.locationsFromUrls(urls);
         if (paths.length === 0 || !destination)
             return;
-        // A folder cannot be dropped into itself.
-        if (paths.indexOf(destination) >= 0)
+        // A folder into itself, or back into the folder it came from: a
+        // drag abandoned, whatever key is held (the label showed nothing).
+        if (DragState.isNoop(paths, destination))
             return;
 
         // The same rule the label beside the pointer showed (DragState):
@@ -542,14 +543,7 @@ FocusScope {
                 FileOperations.createLink(paths, destination);
             return;
         }
-        const isMove = action === "move";
-
-        // Moving things into the folder they are already in is a no-op, not
-        // an operation with a conflict dialog.
-        if (isMove && paths.every(p => Platform.parentPath(p) === destination))
-            return;
-
-        root.transferRequested(paths, destination, isMove);
+        root.transferRequested(paths, destination, action === "move");
     }
 
     // ---- selection --------------------------------------------------------

@@ -19,6 +19,9 @@
 #include <QPainter>
 #include <QPdfWriter>
 #include <QDBusMessage>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QGuiApplication>
 #include <QJSValue>
 #include <QMimeData>
@@ -119,6 +122,7 @@ private Q_SLOTS:
     void dragGestureStartsADrag();
     void polishScreenshots();
     void proFeaturesInTheWindow();
+    void dropHintAndSidebarBookmarkDrop();
 
 private:
     QTemporaryDir m_cache;
@@ -1189,6 +1193,180 @@ void TestQmlViews::proFeaturesInTheWindow()
     QTest::keyClick(window, Qt::Key_P, Qt::ControlModifier);
     QTest::qWait(100);
     QVERIFY(!window->property("commandPaletteOpen").toBool());
+}
+
+// Drives drag events through the window the way the platform does, so the
+// drop targets, DragState's label and the sidebar's New Bookmark row are
+// exercised end to end without a compositor. (Upstream's test of the same
+// feature, adapted to DragState.)
+void TestQmlViews::dropHintAndSidebarBookmarkDrop()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign.*undefined|TypeError"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    const QString album = tree.filePath("album");
+    const QString other = tree.filePath("other");
+    QVERIFY(QDir().mkpath(album));
+    QVERIFY(QDir().mkpath(other));
+    const QString photo = tree.writeFile("photo.txt");
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    window->requestActivate();
+    QTRY_VERIFY(window->isActive());
+    // The modifier state is global and set by the last key event: a test
+    // before this one that ended on a Ctrl shortcut leaves Ctrl "held".
+    QTest::keyRelease(window, Qt::Key_Control, Qt::NoModifier);
+    QTRY_COMPARE(QGuiApplication::keyboardModifiers(), Qt::NoModifier);
+    auto *hint = engine.singletonInstance<QObject *>("Omanta", "DragState");
+    QVERIFY(hint);
+    const auto label = [&] { return hint->property("label").toString(); };
+    const auto shown = [&] { return window->property("dragHintShown").toBool(); };
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QVERIFY(tab);
+    QTRY_VERIFY(findFileRow(tab, album));
+    QTRY_VERIFY(findFileRow(tab, other));
+    const std::function<QQuickItem *(QQuickItem *)> findSidebar = [&](QQuickItem *item) -> QQuickItem * {
+        if (item->property("placesCount").isValid())
+            return item;
+        for (QQuickItem *child : item->childItems()) {
+            if (auto *found = findSidebar(child))
+                return found;
+        }
+        return nullptr;
+    };
+    QQuickItem *sidebar = findSidebar(window->contentItem());
+    QVERIFY(sidebar);
+    QTRY_VERIFY(sidebar->property("placesCount").toInt() >= 5);
+
+    const auto centre = [](QQuickItem *item) {
+        return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
+    };
+    const auto placeholder = [&] { return findItem(sidebar, "placeholder", true); };
+    const Qt::DropActions actions = Qt::CopyAction | Qt::MoveAction;
+    const auto enter = [&](const QPoint &at, QMimeData *mime) {
+        QDragEnterEvent event(at, actions, mime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    const auto move = [&](const QPoint &at, QMimeData *mime) {
+        QDragMoveEvent event(at, actions, mime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    const auto drop = [&](const QPoint &at, QMimeData *mime) {
+        QDropEvent event(at, actions, mime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    const auto leave = [&] {
+        QDragLeaveEvent event;
+        QCoreApplication::sendEvent(window, &event);
+    };
+
+    // A folder dragged over the sidebar's empty space raises the New Bookmark
+    // row; dropping on it writes the GTK bookmark and the row goes away.
+    QMimeData folderMime;
+    folderMime.setUrls({ QUrl::fromLocalFile(album) });
+    QVERIFY(!placeholder());
+    const QPoint blank = sidebar->mapToScene(QPointF(sidebar->width() / 2,
+                                                     sidebar->height() - 60)).toPoint();
+    enter(blank, &folderMime);
+    move(blank, &folderMime);
+    QTRY_VERIFY(placeholder());
+    QVERIFY(window->property("bookmarkDropTarget").toBool());
+    QCOMPARE(placeholder()->property("name").toString(), QStringLiteral("New Bookmark"));
+    move(centre(placeholder()), &folderMime);
+    QTRY_COMPARE(label(), QStringLiteral("+  Bookmark “album”"));
+    QCOMPARE(hint->property("word").toString(), QStringLiteral("Bookmark"));
+    QVERIFY(shown());
+    // Crossing back onto the blank space is an exit then an enter; the row
+    // must not blink out in between.
+    move(blank, &folderMime);
+    QTest::qWait(50);
+    QVERIFY(placeholder());
+    move(centre(placeholder()), &folderMime);
+    drop(centre(placeholder()), &folderMime);
+    QTRY_VERIFY(!placeholder());
+    QTRY_VERIFY(!shown());
+    QFile bookmarks(config.filePath("OMANTA_BOOKMARKS_FILE"));
+    QVERIFY(bookmarks.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(bookmarks.readAll()),
+             QUrl::fromLocalFile(album).toString() + QLatin1Char('\n'));
+    QTRY_VERIFY(findItem(sidebar, "location", album));
+    // The drop bookmarked; it did not move the folder anywhere.
+    QVERIFY(QFileInfo(album).isDir());
+
+    // A folder that is already bookmarked raises no placeholder; neither
+    // does a plain file.
+    enter(blank, &folderMime);
+    move(blank, &folderMime);
+    QTest::qWait(50);
+    QVERIFY(!placeholder());
+    leave();
+    QMimeData fileMime;
+    fileMime.setUrls({ QUrl::fromLocalFile(photo) });
+    enter(blank, &fileMime);
+    move(blank, &fileMime);
+    QTest::qWait(50);
+    QVERIFY(!placeholder());
+    leave();
+    QTRY_VERIFY(!shown());
+
+    // Over a folder in the view the label follows the modifier rule, and it
+    // updates without the pointer moving.
+    QQuickItem *otherRow = findFileRow(tab, other);
+    QVERIFY(otherRow);
+    enter(centre(otherRow), &fileMime);
+    move(centre(otherRow), &fileMime);
+    QTRY_COMPARE(label(), QStringLiteral("→  Move to “other”"));
+    QTest::keyPress(window, Qt::Key_Control, Qt::ControlModifier);
+    QTRY_COMPARE(label(), QStringLiteral("+  Copy to “other”"));
+    QTest::keyRelease(window, Qt::Key_Control, Qt::NoModifier);
+    QTRY_COMPARE(label(), QStringLiteral("→  Move to “other”"));
+
+    // Over the view's own empty space the file would land in the folder it
+    // is already in: an abandoned drag, so nothing is promised — and Ctrl
+    // must not turn it into a "name (copy)" beside the original.
+    const QPoint viewBlank = tab->mapToScene(QPointF(tab->width() / 2,
+                                                     tab->height() - 60)).toPoint();
+    move(viewBlank, &fileMime);
+    QTRY_VERIFY(!shown());
+    QTest::keyPress(window, Qt::Key_Control, Qt::ControlModifier);
+    QTest::qWait(250);
+    QVERIFY(!shown());
+    drop(viewBlank, &fileMime);
+    QTest::qWait(300);
+    QCOMPARE(QDir(tree.path()).entryList(QDir::Files), QStringList{ QStringLiteral("photo.txt") });
+    QTest::keyRelease(window, Qt::Key_Control, Qt::NoModifier);
+
+    // Sidebar rows with a fixed meaning say so outright.
+    enter(viewBlank, &fileMime);
+    QQuickItem *trash = findItem(sidebar, "location", QStringLiteral("trash:///"));
+    QVERIFY(trash);
+    move(centre(trash), &fileMime);
+    QTRY_COMPARE(label(), QStringLiteral("→  Move to Trash"));
+    QVERIFY(hint->property("destructive").toBool());
+    leave();
+    QTRY_VERIFY(!shown());
+    QVERIFY(QFileInfo::exists(photo));
 }
 
 QTEST_MAIN(TestQmlViews)

@@ -39,6 +39,11 @@ Window {
     readonly property bool sortDescending: currentTab ? currentTab.sortDescending : false
     readonly property int zoom: currentTab ? currentTab.zoom : 0
     readonly property int visibleCount: currentTab ? currentTab.files.count : 0
+    // The drop hint and the sidebar's New Bookmark row, readable over D-Bus
+    // so a real compositor drag can be verified from a script.
+    readonly property string dragHint: DragState.active ? DragState.label : ""
+    readonly property bool dragHintShown: DragState.active && DragState.window === root
+    readonly property bool bookmarkDropTarget: sidebar.bookmarkDropTarget
     // The proxy's live value, not the Settings one: reading it end-to-end
     // proves the file → Settings → binding → proxy chain, which is what the
     // UI verification asserts on.
