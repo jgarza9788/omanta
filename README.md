@@ -65,6 +65,8 @@ Omarchy theme.
   (red past 90%), and "N GB free" on the status line
 - Open With: right-click a file to open it in any app registered for its
   type, or "Other Application…" to choose one and set the default
+- Move to… and Copy to… in the right-click menu: pick a destination folder
+  and the selection goes there, with the same name-clash dialog as paste
 - New Folder from the + button beside search, Ctrl+Shift+N, or right-click
 - Search: recursive filename plus full-text (via `localsearch`), date and
   type filters. Names match as plain text, as a glob when the query has
@@ -140,10 +142,10 @@ Grab the package and its checksum file from the
 install it:
 
 ```bash
-curl -LO https://github.com/28allday/omanta/releases/download/v0.1.23/omanta-0.1.23-1-x86_64.pkg.tar.zst
-curl -LO https://github.com/28allday/omanta/releases/download/v0.1.23/SHA256SUMS
+curl -LO https://github.com/28allday/omanta/releases/download/v0.1.25/omanta-0.1.25-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/28allday/omanta/releases/download/v0.1.25/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS   # must print "OK"
-sudo pacman -U omanta-0.1.23-1-x86_64.pkg.tar.zst
+sudo pacman -U omanta-0.1.25-1-x86_64.pkg.tar.zst
 ```
 
 (The package is unsigned, so pacman won't install it straight from a URL —
