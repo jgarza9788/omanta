@@ -1,0 +1,66 @@
+.pragma library
+
+// The one pro-feature table, read by the Pro Features panel
+// (ProFeaturesDialog): the features from plan-profeatures.md, most helpful
+// first. Keep `keys` in step with Keymap.js and Main.qml.
+//
+// Fields: name, group, keys (how to reach it), summary (what it does),
+// ready (built and working), options (Settings switches shown on the card:
+// [{ key, label }]).
+
+var features = [
+    { name: "Command Palette and Fuzzy Jump", group: "Navigation", ready: true,
+      keys: "Ctrl+P, or : in vim keys",
+      summary: "Type a few letters to jump to any folder you have visited, ranked by how often and how recently you went there, or to run any action. A typed path (/… or ~/…) goes straight there." },
+    { name: "Operation Queue", group: "File operations", ready: true,
+      keys: "The operations indicator at the bottom of the sidebar",
+      summary: "Copies and moves run one after another. Pause and resume the whole queue, reorder what's waiting, cancel any job, and set a speed limit so a big copy doesn't slow everything else down." },
+    { name: "Compare and Sync Panes", group: "File operations", ready: true,
+      keys: "Ctrl+Shift+C in split view (F3)",
+      summary: "Lists the files that are only in one pane, newer in one pane, or different, through every subfolder. Tick rows and copy them across, or mirror one pane onto the other. Every step can be undone." },
+    { name: "Terminal Pane", group: "Customisation", ready: true,
+      keys: "F4",
+      summary: "A command line docked under the files that runs in the folder you're in; cd moves the tab with it. For full-screen programs (vim, htop), its button opens a real terminal in the same folder." },
+    { name: "Browse Archives as Folders", group: "Archives", ready: true,
+      keys: "Enter on a .zip, .tar or .7z, or right-click → Browse Archive",
+      summary: "Opens an archive like a folder, so you can look around and copy out just what you need. It's a temporary copy, unpacked safely and cleared when omanta closes; the archive itself is never changed." },
+    { name: "Path Bar Completion", group: "Navigation", ready: true,
+      keys: "Tab in the location bar (Ctrl+L)",
+      summary: "Completes folder names as you type a path, the way a shell does, and lists the choices when more than one folder matches." },
+    { name: "Coloured Tags", group: "Metadata", ready: true,
+      keys: "Right-click → Tags",
+      summary: "Give files coloured tags that stay with them wherever they move. Tags show as dots beside names, and each tag gets a sidebar entry listing its files. They are stored the freedesktop way (user.xdg.tags), so other apps can read them." },
+    { name: "Syntax Highlighting", group: "Preview", ready: true,
+      keys: "Space on a source file",
+      summary: "Quick view colours code by language — C/C++, Python, JavaScript/QML, Rust, Go, shell, JSON, YAML, TOML, HTML/XML, CSS, SQL and more — in your theme's colours." },
+    { name: "Disk Usage Map", group: "Preview", ready: true,
+      keys: "Right-click → Disk Usage…",
+      summary: "A map of a folder where each box is sized by the space it takes on disk, so you can see at once what is filling it. Click a folder's box to go into it." },
+    { name: "Git Status", group: "Metadata", ready: true,
+      keys: "Automatic inside a Git repository",
+      summary: "Badges beside names while you browse a repository: M modified, A added, ? untracked, I ignored, ! conflict. A folder shows the strongest change inside it.",
+      options: [{ key: "showGitStatus", label: "Show Git badges" },
+                { key: "hideGitIgnored", label: "Hide files .gitignore covers" }] },
+    { name: "Vim Marks", group: "Navigation", ready: true,
+      keys: "' then a letter to set, ` then the letter to jump",
+      summary: "Bookmark a folder under a letter and jump back to it from anywhere with two keys. Marks are remembered after a restart." },
+    { name: "Extra Columns", group: "Metadata", ready: true,
+      keys: "View options → Visible Columns… → Media",
+      summary: "Adds picture size, playing time, artist, album and the date a photo was taken as list columns you can show and sort by. Read in the background, without slowing the view." },
+    { name: "Verify After Copy", group: "File operations", ready: true,
+      keys: "Automatic when on",
+      summary: "After a copy finishes, checks every copied file against its original with SHA-256 and tells you if any don't match. Useful for backups and USB drives.",
+      options: [{ key: "verifyCopies", label: "Verify every copy" }] },
+    { name: "Keymap Editor", group: "Customisation", ready: true,
+      keys: "Keyboard Shortcuts (?) → Edit Vim Keys…",
+      summary: "Change which key does what in vim keys. Your changes sit on top of the built-in keys and can be reset at any time." },
+    { name: "Duplicate Finder", group: "File operations", ready: true,
+      keys: "Right-click → Find Duplicates…",
+      summary: "Finds files with the same contents (by size, then by checksum) and moves the extra copies to the trash, or replaces them with hard links to one copy." },
+    { name: "Batch Permissions and Owner", group: "File operations", ready: true,
+      keys: "Right-click → Permissions…, or Properties → Permissions",
+      summary: "Change permissions and owner for many files at once, optionally through every subfolder, and only for folders or only for files. Untouched permissions stay as they were." },
+    { name: "Saved Searches", group: "Metadata", ready: true,
+      keys: "Search bar → Save",
+      summary: "Save a search with its filters as a sidebar entry. Opening it runs the search again, so it always shows what matches now." }
+];

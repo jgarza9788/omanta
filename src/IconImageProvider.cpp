@@ -118,6 +118,17 @@ const Glyph kGlyphs[] = {
       R"(<path fill="%C%" d="M4 6 h16 v1.8 H4 z M4 11.1 h11 v1.8 H4 z M4 16.2 h6 V18 H4 z"/>)" },
     { "eject",
       R"(<path fill="%C%" d="M12 4 l8 9 H4 z M4 16 h16 v3 H4 z"/>)" },
+    // Pro features' menu rows.
+    { "search",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M10 3.5 a6.5 6.5 0 0 1 5.2 10.4 l4.6 4.6 -1.3 1.3 -4.6 -4.6 A6.5 6.5 0 1 1 10 3.5 z M10 5.4 a4.6 4.6 0 1 0 0 9.2 a4.6 4.6 0 0 0 0 -9.2 z"/>)" },
+    { "tag",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M3.5 4.5 a1 1 0 0 1 1 -1 h7 l9 9 a1 1 0 0 1 0 1.4 l-6.6 6.6 a1 1 0 0 1 -1.4 0 l-9 -9 z M8 6 a2 2 0 1 0 0 4 a2 2 0 0 0 0 -4 z"/>)" },
+    { "chart",
+      R"(<path fill="%C%" d="M3.5 3.5 h8 v8 h-8 z M12.5 3.5 h8 v5 h-8 z M12.5 9.5 h8 v11 h-8 z M3.5 12.5 h8 v8 h-8 z"/>)" },
+    { "compare",
+      R"(<path fill="%C%" d="M3.5 4 h7 v16 h-7 z M13.5 4 h7 v16 h-7 z M5 7 v1.6 h4 V7 z M15 7 v1.6 h4 V7 z M5 10.5 v1.6 h4 v-1.6 z M15 13 v1.6 h4 V13 z" fill-opacity="0.9"/>)" },
+    { "lock",
+      R"(<path fill="%C%" fill-rule="evenodd" d="M7.5 10 V7.5 a4.5 4.5 0 0 1 9 0 V10 h1 a1 1 0 0 1 1 1 v8.5 a1 1 0 0 1 -1 1 h-11 a1 1 0 0 1 -1 -1 V11 a1 1 0 0 1 1 -1 z M9.4 10 h5.2 V7.5 a2.6 2.6 0 0 0 -5.2 0 z"/>)" },
     { "extract",
       R"(<path fill="%C%" fill-rule="evenodd" d="M4 5 a1.5 1.5 0 0 1 1.5 -1.5 h13 A1.5 1.5 0 0 1 20 5 v2 a1.5 1.5 0 0 1 -1 1.4 V18 a2.5 2.5 0 0 1 -2.5 2.5 h-9 A2.5 2.5 0 0 1 5 18 V8.4 A1.5 1.5 0 0 1 4 7 z M11.1 10 h1.8 v4.2 l1.6 -1.6 1.2 1.2 L12 17.5 8.3 13.8 l1.2 -1.2 1.6 1.6 z"/>)" },
 };

@@ -21,6 +21,8 @@ QString rootLabel(const QString &scheme)
         return QStringLiteral("Network");
     if (scheme == QLatin1String("computer"))
         return QStringLiteral("Computer");
+    if (scheme == QLatin1String("tag"))
+        return QStringLiteral("Tags");
     return {};
 }
 

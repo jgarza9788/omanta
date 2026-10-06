@@ -508,6 +508,62 @@ QStringList Platform::collisions(const QStringList &paths, const QString &destin
     return clashing;
 }
 
+QVariantMap Platform::completePath(const QString &input, const QString &base) const
+{
+    QVariantMap out{ { QStringLiteral("text"), input }, { QStringLiteral("matches"), QStringList() } };
+    if (input.contains(QLatin1String("://")))
+        return out; // URIs: no listing over the network from a keypress
+
+    const int slash = int(input.lastIndexOf(QLatin1Char('/')));
+    const QString typedDir = slash >= 0 ? input.left(slash + 1) : QString();
+    const QString prefix = input.mid(slash + 1);
+    QString dir = typedDir.isEmpty() ? QString() : typedDir;
+    if (dir == QLatin1String("~/") || dir.startsWith(QLatin1String("~/")))
+        dir = QDir::homePath() + dir.mid(1);
+    else if (input == QLatin1String("~"))
+        return { { QStringLiteral("text"), QStringLiteral("~/") }, { QStringLiteral("matches"), QStringList() } };
+    if (dir.isEmpty())
+        dir = base;
+    else if (!dir.startsWith(QLatin1Char('/')))
+        dir = QDir(base).absoluteFilePath(dir);
+    if (!QFileInfo(dir).isDir())
+        return out;
+
+    QDir::Filters filters = QDir::Dirs | QDir::NoDotAndDotDot;
+    if (prefix.startsWith(QLatin1Char('.')))
+        filters |= QDir::Hidden;
+    QStringList matches;
+    const QStringList names = QDir(dir).entryList(filters, QDir::Name | QDir::IgnoreCase);
+    for (const QString &name : names) {
+        if (name.startsWith(prefix, Qt::CaseInsensitive))
+            matches.append(name);
+        if (matches.size() >= 50)
+            break;
+    }
+    if (matches.isEmpty())
+        return out;
+
+    QString completed;
+    if (matches.size() == 1) {
+        completed = matches.first() + QLatin1Char('/');
+    } else {
+        // The common start, case-insensitively, spelled as the first match.
+        completed = matches.first();
+        for (const QString &name : std::as_const(matches)) {
+            int i = 0;
+            while (i < completed.size() && i < name.size()
+                   && completed.at(i).toLower() == name.at(i).toLower())
+                ++i;
+            completed.truncate(i);
+        }
+        if (completed.size() < prefix.size())
+            completed = prefix;
+    }
+    out.insert(QStringLiteral("text"), typedDir + completed);
+    out.insert(QStringLiteral("matches"), matches.size() > 1 ? matches : QStringList());
+    return out;
+}
+
 QVariantList Platform::pathCrumbs(const QString &path) const
 {
     QVariantList crumbs;

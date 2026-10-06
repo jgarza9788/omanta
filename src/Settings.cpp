@@ -148,6 +148,71 @@ QStringList Settings::columnListFor(const char *key, const QStringList &fallback
     return out.isEmpty() ? fallback : out;
 }
 
+QStringList Settings::allProListColumns()
+{
+    return { QStringLiteral("dimensions"), QStringLiteral("duration"), QStringLiteral("artist"),
+             QStringLiteral("album"), QStringLiteral("photoDate") };
+}
+
+QStringList Settings::proListColumns() const
+{
+    const QStringList known = allProListColumns();
+    QStringList out;
+    const QStringList parts = m_values.value(QStringLiteral("proListColumns"))
+                                  .split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString &raw : parts) {
+        const QString id = raw.trimmed();
+        if (known.contains(id) && !out.contains(id))
+            out.append(id);
+    }
+    // Shown in the canonical order, whatever order the file lists them in.
+    QStringList ordered;
+    for (const QString &id : known) {
+        if (out.contains(id))
+            ordered.append(id);
+    }
+    return ordered;
+}
+
+QVariantMap Settings::marks() const
+{
+    // "a=/path|b=/other": one line in the file, like every other value.
+    QVariantMap out;
+    const QStringList parts = m_values.value(QStringLiteral("marks"))
+                                  .split(QLatin1Char('|'), Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        const int eq = part.indexOf(QLatin1Char('='));
+        if (eq != 1 || !part.at(0).isLetter())
+            continue;
+        const QString path = part.mid(2);
+        if (path.startsWith(QLatin1Char('/')))
+            out.insert(part.left(1), path);
+    }
+    return out;
+}
+
+QString Settings::mark(const QString &letter) const
+{
+    return marks().value(letter).toString();
+}
+
+void Settings::setMark(const QString &letter, const QString &path)
+{
+    if (letter.size() != 1 || !letter.at(0).isLetter() || path.contains(QLatin1Char('|')))
+        return;
+    QVariantMap all = marks();
+    if (path.isEmpty())
+        all.remove(letter);
+    else if (path.startsWith(QLatin1Char('/')))
+        all.insert(letter, path);
+    else
+        return;
+    QStringList parts;
+    for (auto it = all.cbegin(); it != all.cend(); ++it)
+        parts << it.key() + QLatin1Char('=') + it.value().toString();
+    set("marks", parts.join(QLatin1Char('|')));
+}
+
 QStringList Settings::allCaptionFields()
 {
     QStringList fields = allListColumns();

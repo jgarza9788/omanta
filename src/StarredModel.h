@@ -29,6 +29,10 @@ class StarredModel : public QAbstractListModel
     // most tabs are never looking at starred:///.
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    // Instead of the store: list exactly these paths (a tag's view). Same
+    // rows, same roles — the tab cannot tell a tag from the stars.
+    Q_PROPERTY(bool useCustomPaths READ useCustomPaths WRITE setUseCustomPaths NOTIFY customPathsChanged)
+    Q_PROPERTY(QStringList customPaths READ customPaths WRITE setCustomPaths NOTIFY customPathsChanged)
 
 public:
     explicit StarredModel(QObject *parent = nullptr);
@@ -43,11 +47,16 @@ public:
     bool active() const { return m_active; }
     void setActive(bool active);
     int count() const { return int(m_rows.size()); }
+    bool useCustomPaths() const { return m_useCustomPaths; }
+    void setUseCustomPaths(bool use);
+    QStringList customPaths() const { return m_customPaths; }
+    void setCustomPaths(const QStringList &paths);
 
 Q_SIGNALS:
     void storeChanged();
     void activeChanged();
     void countChanged();
+    void customPathsChanged();
 
 private:
     struct Row {
@@ -67,6 +76,8 @@ private:
     void finishLoad();
 
     StarredStore *m_store = nullptr;
+    bool m_useCustomPaths = false;
+    QStringList m_customPaths;
     bool m_active = false;
     QList<Row> m_rows;
 

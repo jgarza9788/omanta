@@ -61,6 +61,11 @@ FocusScope {
             activePane = secondLoader.item.tab;
     }
 
+    // Both panes, left first (just the one when not split).
+    function panes() {
+        return split && secondLoader.item ? [firstCell.tab, secondLoader.item.tab] : [firstCell.tab];
+    }
+
     function cyclePane() {
         if (!split || !secondLoader.item)
             return;

@@ -50,6 +50,7 @@ omanta_test(tst_navigation
 omanta_test(tst_fileoperations
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperations.cpp
+    ${CMAKE_SOURCE_DIR}/src/Checksum.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperationWorker.cpp
     ${CMAKE_SOURCE_DIR}/src/ArchiveEngine.cpp
 )
@@ -112,6 +113,7 @@ omanta_test(tst_servers
 omanta_test(tst_batchrename
     ${CMAKE_SOURCE_DIR}/src/BatchRenamer.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperations.cpp
+    ${CMAKE_SOURCE_DIR}/src/Checksum.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperationWorker.cpp
     ${CMAKE_SOURCE_DIR}/src/ArchiveEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
@@ -120,6 +122,7 @@ omanta_test(tst_batchrename
 omanta_test(tst_archives
     ${CMAKE_SOURCE_DIR}/src/ArchiveEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperations.cpp
+    ${CMAKE_SOURCE_DIR}/src/Checksum.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperationWorker.cpp
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
 )
@@ -172,6 +175,7 @@ target_compile_definitions(tst_switcher PRIVATE
 omanta_test(tst_faultrecovery
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperations.cpp
+    ${CMAKE_SOURCE_DIR}/src/Checksum.cpp
     ${CMAKE_SOURCE_DIR}/src/FileOperationWorker.cpp
     ${CMAKE_SOURCE_DIR}/src/ArchiveEngine.cpp
 )
@@ -179,4 +183,28 @@ omanta_test(tst_faultrecovery
 omanta_test(tst_mounter
     ${CMAKE_SOURCE_DIR}/src/Mounter.cpp
     ${CMAKE_SOURCE_DIR}/src/Location.cpp
+)
+
+# The pro features' engines (main menu → Pro Features), headless.
+omanta_test(tst_profeatures
+    ${CMAKE_SOURCE_DIR}/src/Frecency.cpp
+    ${CMAKE_SOURCE_DIR}/src/Tags.cpp
+    ${CMAKE_SOURCE_DIR}/src/GitStatus.cpp
+    ${CMAKE_SOURCE_DIR}/src/MediaInfo.cpp
+    ${CMAKE_SOURCE_DIR}/src/ThumbnailProvider.cpp
+    ${CMAKE_SOURCE_DIR}/src/SyntaxHighlighter.cpp
+    ${CMAKE_SOURCE_DIR}/src/FolderCompare.cpp
+    ${CMAKE_SOURCE_DIR}/src/DiskUsage.cpp
+    ${CMAKE_SOURCE_DIR}/src/DuplicateFinder.cpp
+    ${CMAKE_SOURCE_DIR}/src/BatchPermissions.cpp
+    ${CMAKE_SOURCE_DIR}/src/ShellSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/SavedSearches.cpp
+    ${CMAKE_SOURCE_DIR}/src/Settings.cpp
+    ${CMAKE_SOURCE_DIR}/src/Platform.cpp
+    ${CMAKE_SOURCE_DIR}/src/Applications.cpp
+    ${CMAKE_SOURCE_DIR}/src/ArchiveEngine.cpp
+    ${CMAKE_SOURCE_DIR}/src/Location.cpp
+    ${CMAKE_SOURCE_DIR}/src/Checksum.cpp
+    ${CMAKE_SOURCE_DIR}/src/FileOperations.cpp
+    ${CMAKE_SOURCE_DIR}/src/FileOperationWorker.cpp
 )

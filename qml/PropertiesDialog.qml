@@ -11,6 +11,9 @@ import Omanta.Runtime
 OmDialog {
     id: root
 
+    // Pro: hand the selection to the batch permissions dialog.
+    signal batchPermissionsRequested(var paths)
+
     // What the dialog is currently claiming, hoisted so the window can publish
     // it over D-Bus. A dialog that only a human can read is a dialog only a
     // human can test, and that is how the last two UI bugs here survived.
@@ -364,6 +367,20 @@ OmDialog {
                         enabled: properties.canChangeMode
                                  && permissions.draft !== properties.mode
                         onClicked: properties.applyMode(permissions.draft)
+                    }
+                }
+
+                // Pro: many items, owners, or everything inside a folder.
+                OmButton {
+                    objectName: "batchPermissionsButton"
+                    visible: Settings.proFeatures
+                             && properties.paths.every(p => Platform.isLocal(p))
+                    text: properties.itemCount > 1 || properties.isDir
+                          ? qsTr("Change for All Inside…") : qsTr("More Options…")
+                    onClicked: {
+                        const paths = properties.paths;
+                        root.close();
+                        root.batchPermissionsRequested(paths);
                     }
                 }
 

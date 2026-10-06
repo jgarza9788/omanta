@@ -20,6 +20,9 @@ MenuItem {
     property string vimKey: ""
     // A small uppercase caption ("SORT") rather than an action.
     property bool sectionHeader: false
+    // A colour dot in the icon slot (the Tags menu), ticked when `swatchChecked`.
+    property color swatch: "transparent"
+    property bool swatchChecked: false
 
     readonly property string shownShortcut: Settings.keyboardMode === "vim" && vimKey !== ""
                                             ? vimKey : shortcut
@@ -60,13 +63,34 @@ MenuItem {
                 Layout.preferredWidth: 16
                 Layout.preferredHeight: 16
 
+                Rectangle {
+                    anchors.centerIn: parent
+                    visible: item.swatch.a > 0
+                    width: 14
+                    height: 14
+                    radius: 7
+                    color: item.swatch
+                    border.color: item.swatchChecked ? Colors.text : "transparent"
+                    border.width: 1.5
+
+                    Text {
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        visible: item.swatchChecked
+                        text: "✓"
+                        color: "#ffffff"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+                }
+
                 Image {
                     anchors.fill: parent
+                    visible: item.swatch.a === 0 && (glyphKey !== "" || item.iconUrl.toString() !== "")
                     // A checked row shows the check where its icon would be.
                     readonly property string glyphKey: item.checkable ? (item.checked ? "check" : "")
                                                      : item.glyph !== "" ? item.glyph
                                                      : item.subMenu && item.subMenu.glyph ? item.subMenu.glyph : ""
-                    visible: glyphKey !== "" || item.iconUrl.toString() !== ""
                     sourceSize: Qt.size(32, 32)
                     source: item.iconUrl.toString() !== "" ? item.iconUrl
                           : glyphKey !== "" ? Colors.tint("image://fileicon/" + glyphKey,

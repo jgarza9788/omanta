@@ -58,6 +58,196 @@ Window {
     readonly property int operationsCount: FileOperations.operations.length
     readonly property int tabCount: tabModel.count
 
+    // ---- pro features ------------------------------------------------------
+
+    // The one switch (main menu → Pro Features); every pro surface checks it.
+    readonly property bool pro: Settings.proFeatures
+    // The terminal pane (F4) under the files.
+    property bool terminalOpen: false
+    readonly property bool commandPaletteOpen: commandPalette.opened
+
+    // The operation queue's options follow Settings while pro is on.
+    Binding {
+        target: FileOperations
+        property: "verifyCopies"
+        value: root.pro && Settings.verifyCopies
+    }
+    Binding {
+        target: FileOperations
+        property: "speedLimit"
+        value: root.pro && Settings.transferSpeedLimit !== "off"
+               ? parseInt(Settings.transferSpeedLimit) * 1000 * 1000 : 0
+    }
+
+    function toggleTerminal() {
+        if (!pro)
+            return;
+        terminalOpen = !terminalOpen;
+        if (terminalOpen)
+            Qt.callLater(() => terminalPane.focusInput());
+        else
+            returnFocusToView();
+    }
+
+    function openCommandPalette() {
+        if (pro)
+            commandPalette.show();
+    }
+
+    // Split view's two panes, side by side — left is the first pane.
+    function comparePanes() {
+        if (!pro)
+            return;
+        if (!currentSlot || !currentSlot.split) {
+            flash(qsTr("Open split view (F3) to compare two folders"));
+            return;
+        }
+        const panes = currentSlot.panes();
+        compareDialog.compareNow(panes[0].path, panes[1].path);
+    }
+
+    // The folder (or selected folder) a scan-style tool should look at.
+    function toolFolder() {
+        const paths = selection();
+        if (paths.length === 1 && Platform.isDir(paths[0]) && Platform.isLocal(paths[0]))
+            return paths[0];
+        return currentTab && Platform.isLocal(currentTab.path) ? currentTab.path : "";
+    }
+
+    function showDiskUsage() {
+        const folder = toolFolder();
+        if (folder !== "")
+            diskUsageDialog.scan(folder);
+    }
+
+    function findDuplicates() {
+        const folder = toolFolder();
+        if (folder !== "")
+            duplicatesDialog.search(folder);
+    }
+
+    function changePermissions(paths) {
+        const local = (paths || selection()).filter(p => Platform.isLocal(p));
+        if (local.length > 0)
+            batchPermissionsDialog.askAbout(local);
+    }
+
+    // A browsed archive opens in the tab that asked for it.
+    property Item archiveRequester: null
+    function browseArchive(path) {
+        archiveRequester = currentTab;
+        flash(qsTr("Opening “%1”…").arg(Platform.baseName(path)));
+        ArchiveBrowser.open(path);
+    }
+
+    Connections {
+        target: ArchiveBrowser
+        function onOpened(archivePath, folder) {
+            const tab = root.archiveRequester || root.currentTab;
+            root.archiveRequester = null;
+            root.flashText = "";
+            if (tab) {
+                tab.archiveRevision++;
+                tab.navigate(folder);
+            }
+        }
+        function onFailed(archivePath, message) {
+            root.archiveRequester = null;
+            root.flash(qsTr("Could not open “%1”: %2").arg(Platform.baseName(archivePath)).arg(message));
+        }
+    }
+
+    Connections {
+        target: FileOperations
+        function onVerificationFinished(checked, mismatched) {
+            if (mismatched.length === 0) {
+                root.flash(checked === 1 ? qsTr("Verified 1 copied file — it matches")
+                                         : qsTr("Verified %1 copied files — all match").arg(checked));
+                return;
+            }
+            verifyFailed.message = mismatched.length === 1
+                ? qsTr("“%1” doesn't match its original").arg(Platform.baseName(mismatched[0]))
+                : qsTr("%1 copies don't match their originals").arg(mismatched.length);
+            verifyFailed.detail = mismatched.slice(0, 8).join("\n")
+                + (mismatched.length > 8 ? "\n…" : "")
+                + "\n\n" + qsTr("Copy them again, or check the drive.");
+            verifyFailed.open();
+        }
+    }
+
+    // Saved searches: the current search, under a name.
+    function saveCurrentSearch() {
+        if (!pro || !currentTab || currentTab.searchQuery === "" || !Platform.isLocal(currentTab.path))
+            return;
+        saveSearchPrompt.initialText = currentTab.searchQuery;
+        saveSearchPrompt.ask();
+    }
+
+    function runSavedSearch(search) {
+        if (!currentTab || !search || !Platform.isNavigable(search.folder))
+            return;
+        currentTab.navigate(search.folder);
+        // After the navigation, which clears any search.
+        currentTab.searchContent = search.content === true;
+        currentTab.searchMatchMode = search.matchMode || "auto";
+        currentTab.searchDateKind = search.dateKind || "modified";
+        currentTab.searchDateRange = search.dateRange || "any";
+        currentTab.searchTypeFilter = search.typeFilter || "any";
+        currentTab.searchQuery = search.query || "";
+        searchOpen = true;
+        searchField.text = currentTab.searchQuery;
+    }
+
+    // What the command palette offers besides folders: the window's own
+    // actions, with their keys. `available` hides what can't run now.
+    readonly property var paletteActions: [
+        { name: qsTr("New Tab"), shortcut: "Ctrl+T", run: () => runCommand("newTab") },
+        { name: qsTr("New Window"), shortcut: "Ctrl+N",
+          run: () => App.openWindow(currentTab ? currentTab.path : Platform.homePath()) },
+        { name: qsTr("New Folder"), shortcut: "Ctrl+Shift+N", run: () => newFolder() },
+        { name: qsTr("Close Tab"), shortcut: "Ctrl+W", run: () => runCommand("closeTab") },
+        { name: qsTr("Split View"), shortcut: "F3", keywords: "pane dual",
+          run: () => { if (currentSlot) currentSlot.toggleSplit(); } },
+        { name: qsTr("Compare Panes"), shortcut: "Ctrl+Shift+C", keywords: "diff sync mirror",
+          run: () => comparePanes() },
+        { name: qsTr("Terminal Pane"), shortcut: "F4", keywords: "shell command",
+          run: () => toggleTerminal() },
+        { name: qsTr("Open in Terminal"), keywords: "shell",
+          run: () => { if (currentTab && Platform.isLocal(currentTab.path)) Platform.openTerminal(currentTab.path); } },
+        { name: qsTr("Search"), shortcut: "Ctrl+F", run: () => openSearch() },
+        { name: qsTr("Filter This Folder"), shortcut: "Ctrl+Shift+S",
+          run: () => { if (currentTab) currentTab.openFilter(); } },
+        { name: qsTr("Select by Pattern"), shortcut: "Ctrl+S", run: () => askSelectPattern() },
+        { name: qsTr("Select All"), shortcut: "Ctrl+A", run: () => { if (currentTab) currentTab.selectAll(); } },
+        { name: qsTr("Show Hidden Files"), shortcut: "Ctrl+H",
+          run: () => { if (currentTab) currentTab.showHidden = !currentTab.showHidden; } },
+        { name: qsTr("List View"), shortcut: "Ctrl+1", run: () => setViewMode("list") },
+        { name: qsTr("Grid View"), shortcut: "Ctrl+2", run: () => setViewMode("icon") },
+        { name: qsTr("Columns View"), shortcut: "Ctrl+3", run: () => setViewMode("columns") },
+        { name: qsTr("Gallery View"), shortcut: "Ctrl+4", run: () => setViewMode("gallery") },
+        { name: qsTr("Info Panel"), shortcut: "F11", run: () => toggleInfoPanel() },
+        { name: qsTr("Toggle Sidebar"), shortcut: "F9", run: () => toggleSidebar() },
+        { name: qsTr("Bookmark This Folder"), shortcut: "Ctrl+D", run: () => toggleBookmark() },
+        { name: qsTr("Disk Usage"), keywords: "space size treemap", run: () => showDiskUsage() },
+        { name: qsTr("Find Duplicates"), keywords: "same copies dedupe", run: () => findDuplicates() },
+        { name: qsTr("Change Permissions"), keywords: "chmod chown owner",
+          run: () => changePermissions(selection().length > 0 ? selection()
+                                       : (currentTab ? [currentTab.path] : [])) },
+        { name: qsTr("Properties"), shortcut: "Ctrl+I", run: () => showProperties() },
+        { name: qsTr("Reload"), shortcut: "Ctrl+R", run: () => { if (currentTab) currentTab.reload(); } },
+        { name: qsTr("Undo"), shortcut: "Ctrl+Z", run: () => FileOperations.undo() },
+        { name: qsTr("Redo"), shortcut: "Ctrl+Shift+Z", run: () => FileOperations.redo() },
+        { name: qsTr("Empty Trash"), keywords: "delete", run: () => emptyTrashConfirm.open() },
+        { name: qsTr("Go Home"), shortcut: "Alt+Home", keywords: "~",
+          run: () => { if (currentTab) currentTab.navigate(Platform.homePath()); } },
+        { name: qsTr("Go to Trash"), run: () => { if (currentTab) currentTab.navigate("trash:///"); } },
+        { name: qsTr("Edit Vim Keys"), keywords: "keymap remap bindings", run: () => keymapEditor.open() },
+        { name: qsTr("Keyboard Shortcuts"), shortcut: "Ctrl+?", run: () => shortcutsDialog.open() },
+        { name: qsTr("Preferences"), shortcut: "Ctrl+,", run: () => preferencesDialog.open() },
+        { name: qsTr("Pro Features"), run: () => proFeaturesDialog.open() },
+        { name: qsTr("Clear Folder History"), keywords: "frecency forget", run: () => Frecency.clear() }
+    ]
+
     // The sidebar (GitHub #5). Wide, it sits beside the files and F9 flips
     // the saved Settings.showSidebar. Narrow — half a laptop screen when
     // tiled — it hides itself, like Nautilus, and F9 or the header button
@@ -463,6 +653,39 @@ Window {
                             ToolTip.delay: 600
                         }
 
+                        // Pro: keep this search in the sidebar.
+                        Rectangle {
+                            objectName: "saveSearchChip"
+                            visible: root.pro && root.searchQuery !== "" && root.searchContentAvailable
+                            implicitWidth: saveLabel.implicitWidth + 16
+                            implicitHeight: 22
+                            radius: 4
+                            color: saveMouse.containsMouse ? Colors.hover : "transparent"
+                            border.color: Colors.border
+                            border.width: 1
+
+                            Text {
+                                id: saveLabel
+                                textFormat: Text.PlainText
+                                anchors.centerIn: parent
+                                text: qsTr("Save")
+                                color: Colors.textDim
+                                font.pixelSize: 11
+                            }
+
+                            MouseArea {
+                                id: saveMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.saveCurrentSearch()
+                            }
+
+                            ToolTip.visible: saveMouse.containsMouse
+                            ToolTip.text: qsTr("Save this search to the sidebar")
+                            ToolTip.delay: 600
+                        }
+
                         // File-name vs full-text, Nautilus's search filter
                         // at the field's right edge. Hidden where the index
                         // can't answer (non-local).
@@ -814,6 +1037,10 @@ Window {
                     root.sidebarOverlayOpen = false;
                 }
                 onEmptyTrashRequested: emptyTrashConfirm.open()
+                onSavedSearchRequested: search => {
+                    root.runSavedSearch(search);
+                    root.sidebarOverlayOpen = false;
+                }
                 onKeyboardReleased: {
                     root.sidebarOverlayOpen = false;
                     root.returnFocusToView();
@@ -845,7 +1072,10 @@ Window {
                 StackLayout {
                     id: stack
 
-                    anchors.fill: parent
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: terminalPane.visible ? terminalPane.top : parent.bottom
                     currentIndex: 0
 
                     // Deferred: in this handler `currentTab` can still name the
@@ -878,6 +1108,19 @@ Window {
                             onCommandRequested: (command, arg) => root.runCommand(command, arg)
                         }
                     }
+                }
+
+                // Pro: the terminal pane (F4), docked under the files.
+                TerminalPane {
+                    id: terminalPane
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: Math.max(140, Math.min(320, parent.height * 0.35))
+                    visible: root.pro && root.terminalOpen
+                    tab: visible ? root.currentTab : null
+                    onCloseRequested: root.toggleTerminal()
+                    onFocusReleased: root.returnFocusToView()
                 }
 
                 // Over the files only — the sidebar and chrome stay usable.
@@ -1219,6 +1462,9 @@ Window {
             if (searchOpen)
                 closeSearch();
             break;
+        case "flash": flash(arg); break;
+        case "palette": openCommandPalette(); break;
+        case "browseArchive": browseArchive(arg); break;
         }
     }
 
@@ -1252,7 +1498,7 @@ Window {
             return;
         const target = other.path;
         if (target === "trash:///" || target === "recent:///" || target === "network:///"
-            || target === "starred:///") {
+            || target === "starred:///" || target.startsWith("tag:")) {
             flash(qsTr("The other pane is not a folder files can go into"));
             return;
         }
@@ -1325,7 +1571,7 @@ Window {
             return false;
         const path = currentTab.path;
         return path !== "trash:///" && path !== "recent:///"
-            && path !== "network:///" && path !== "starred:///";
+            && path !== "network:///" && path !== "starred:///" && !path.startsWith("tag:");
     }
 
     function toggleBookmark() {
@@ -1350,7 +1596,7 @@ Window {
             return false;
         const path = currentTab.path;
         return path !== "trash:///" && path !== "recent:///"
-            && path !== "network:///" && path !== "starred:///";
+            && path !== "network:///" && path !== "starred:///" && !path.startsWith("tag:");
     }
 
     // The Network view carries its own chrome: the server bar below the view
@@ -1574,6 +1820,7 @@ Window {
         id: propertiesDialog
         objectName: "propertiesDialog"
         onClosed: root.returnFocusToView()
+        onBatchPermissionsRequested: paths => root.changePermissions(paths)
     }
 
     BatchRenameDialog {
@@ -1833,6 +2080,22 @@ Window {
         }
 
         OmMenuItem {
+            text: qsTr("Pro Features")
+            glyph: "star"
+            onTriggered: proFeaturesDialog.open()
+        }
+
+        OmMenuItem {
+            text: qsTr("Command Palette")
+            glyph: "search"
+            shortcut: "Ctrl+P"
+            vimKey: ":"
+            visible: root.pro
+            height: visible ? implicitHeight : 0
+            onTriggered: root.openCommandPalette()
+        }
+
+        OmMenuItem {
             text: qsTr("Keyboard Shortcuts")
             glyph: "keyboard"
             shortcut: "Ctrl+?"
@@ -1853,9 +2116,15 @@ Window {
         onClosed: root.returnFocusToView()
     }
 
+    ProFeaturesDialog {
+        id: proFeaturesDialog
+        onClosed: root.returnFocusToView()
+    }
+
     ShortcutsDialog {
         id: shortcutsDialog
         onClosed: root.returnFocusToView()
+        onEditKeysRequested: keymapEditor.open()
     }
 
     AboutDialog {
@@ -1865,6 +2134,97 @@ Window {
 
     VisibleColumnsDialog {
         id: visibleColumnsDialog
+        onClosed: root.returnFocusToView()
+    }
+
+    // ---- pro dialogs ---------------------------------------------------------
+
+    CommandPalette {
+        id: commandPalette
+        actions: root.paletteActions
+        onNavigateRequested: path => { if (root.currentTab) root.currentTab.navigate(path); }
+        onClosed: root.returnFocusToView()
+    }
+
+    CompareDialog {
+        id: compareDialog
+        onClosed: root.returnFocusToView()
+        onMirrorRequested: (copies, destinationRoot, extras) => {
+            mirrorConfirm.copies = copies;
+            mirrorConfirm.extras = extras;
+            mirrorConfirm.message = qsTr("Make “%1” match the other pane?").arg(Platform.baseName(destinationRoot));
+            mirrorConfirm.detail = qsTr("%1 items will be copied over (replacing older ones) and %2 moved to the trash. Ctrl+Z undoes each step.")
+                                       .arg(copies.length).arg(extras.length);
+            mirrorConfirm.open();
+        }
+    }
+
+    ConfirmDialog {
+        id: mirrorConfirm
+        property var copies: []
+        property var extras: []
+        confirmText: qsTr("Mirror")
+        onConfirmed: {
+            const byFolder = {};
+            for (const copy of copies)
+                (byFolder[copy.destination] = byFolder[copy.destination] || []).push(copy.source);
+            for (const folder in byFolder)
+                FileOperations.copy(byFolder[folder], folder, FileOperations.Replace);
+            if (extras.length > 0)
+                FileOperations.trash(extras, root);
+            compareDialog.close();
+        }
+        onClosed: root.returnFocusToView()
+    }
+
+    DiskUsageDialog {
+        id: diskUsageDialog
+        onClosed: root.returnFocusToView()
+        onRevealRequested: path => {
+            if (!root.currentTab)
+                return;
+            root.currentTab.pendingSelection = Platform.baseName(path);
+            root.currentTab.navigate(Platform.parentPath(path));
+        }
+    }
+
+    DuplicatesDialog {
+        id: duplicatesDialog
+        onClosed: root.returnFocusToView()
+        onTrashRequested: paths => FileOperations.trash(paths, root)
+        onFlashRequested: text => root.flash(text)
+    }
+
+    BatchPermissionsDialog {
+        id: batchPermissionsDialog
+        onClosed: root.returnFocusToView()
+        onFlashRequested: text => root.flash(text)
+    }
+
+    KeymapEditorDialog {
+        id: keymapEditor
+        onClosed: root.returnFocusToView()
+    }
+
+    PromptDialog {
+        id: saveSearchPrompt
+        prompt: qsTr("Name for this saved search")
+        onAccepted_: name => {
+            const tab = root.currentTab;
+            if (!tab)
+                return;
+            SavedSearches.save({ name: name, folder: tab.path, query: tab.searchQuery,
+                                 content: tab.searchContent, matchMode: tab.searchMatchMode,
+                                 dateKind: tab.searchDateKind, dateRange: tab.searchDateRange,
+                                 typeFilter: tab.searchTypeFilter });
+            root.flash(qsTr("Saved “%1” to the sidebar").arg(name));
+        }
+        onClosed: root.returnFocusToView()
+    }
+
+    ConfirmDialog {
+        id: verifyFailed
+        confirmText: qsTr("OK")
         onClosed: root.returnFocusToView()
     }
 
@@ -2171,6 +2531,10 @@ Window {
         property string openWithPath: ""
         property var templateFiles: []
         property bool newDocumentShown: false
+        // Pro: the Tags submenu, inserted while the selection is local files.
+        property bool tagsShown: false
+        property bool selectionTaggable: false
+        property bool selectionBrowsable: false
         onAboutToShow: {
             folderBookmarked = root.currentTab
                 ? sidebar.isBookmarked(root.currentTab.path) : false;
@@ -2204,6 +2568,27 @@ Window {
                 && Platform.isLocal(root.currentTab.path)
                 && root.currentTab.selectionAllArchives();
             selectionActions = UserActions.actionsFor(actionPaths);
+
+            selectionTaggable = root.pro && actionPaths.length > 0
+                && actionPaths.every(p => Platform.isLocal(p));
+            selectionBrowsable = root.pro && actionPaths.length === 1 && root.currentTab
+                && Platform.isLocal(actionPaths[0]) && root.currentTab.selectionAllArchives();
+            if (selectionTaggable !== tagsShown) {
+                if (selectionTaggable) {
+                    let at = contextMenu.count;
+                    for (let i = 0; i < contextMenu.count; ++i) {
+                        const item = contextMenu.itemAt(i);
+                        if (item && (item.text === qsTr("Star") || item.text === qsTr("Unstar"))) {
+                            at = i + 1;
+                            break;
+                        }
+                    }
+                    contextMenu.insertMenu(at, tagsMenu);
+                } else {
+                    contextMenu.removeMenu(tagsMenu);
+                }
+                tagsShown = selectionTaggable;
+            }
 
             // New Document exists only while ~/Templates has files and the
             // view is a real local directory — hidden otherwise, as
@@ -2452,6 +2837,15 @@ Window {
         }
 
         OmMenuItem {
+            // Pro: look inside without extracting.
+            text: qsTr("Browse Archive")
+            glyph: "folder"
+            visible: contextMenu.selectionBrowsable
+            height: visible ? implicitHeight : 0
+            onTriggered: root.browseArchive(contextMenu.actionPaths[0])
+        }
+
+        OmMenuItem {
             text: qsTr("Extract Here")
             glyph: "extract"
             visible: contextMenu.selectionExtractable
@@ -2526,6 +2920,36 @@ Window {
 
         OmMenuSeparator {}
 
+        // Pro: the folder tools — on the selected folder, else this one.
+        OmMenuItem {
+            text: qsTr("Disk Usage…")
+            glyph: "chart"
+            visible: root.pro
+            height: visible ? implicitHeight : 0
+            enabled: root.toolFolder() !== ""
+            onTriggered: root.showDiskUsage()
+        }
+
+        OmMenuItem {
+            text: qsTr("Find Duplicates…")
+            glyph: "copy"
+            visible: root.pro
+            height: visible ? implicitHeight : 0
+            enabled: root.toolFolder() !== ""
+            onTriggered: root.findDuplicates()
+        }
+
+        OmMenuItem {
+            text: qsTr("Permissions…")
+            glyph: "lock"
+            visible: root.pro
+            height: visible ? implicitHeight : 0
+            enabled: contextMenu.selectionTaggable
+                     || (root.currentTab !== null && Platform.isLocal(root.currentTab.path))
+            onTriggered: root.changePermissions(contextMenu.actionPaths.length > 0
+                                                ? contextMenu.actionPaths : [root.currentTab.path])
+        }
+
         OmMenuItem {
             text: qsTr("Properties")
             glyph: "info"
@@ -2569,6 +2993,37 @@ Window {
             }
             onObjectAdded: (index, object) => contextMenu.addItem(object)
             onObjectRemoved: (index, object) => contextMenu.removeItem(object)
+        }
+    }
+
+    // Pro: coloured tags for the selection. Ticked when every selected item
+    // has the tag; choosing it adds the tag to all, or removes it from all.
+    OmMenu {
+        id: tagsMenu
+        title: qsTr("Tags")
+        glyph: "tag"
+
+        Instantiator {
+            model: Tags.palette()
+            OmMenuItem {
+                required property string modelData
+                objectName: "tag" + modelData
+                text: modelData
+                swatch: Tags.colorFor(modelData)
+                swatchChecked: contextMenu.opened
+                               && (Tags.revision, Tags.allHave(contextMenu.actionPaths, modelData))
+                onTriggered: Tags.toggle(contextMenu.actionPaths, modelData)
+            }
+            onObjectAdded: (index, object) => tagsMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => tagsMenu.removeItem(object)
+        }
+
+        OmMenuSeparator {}
+
+        OmMenuItem {
+            text: qsTr("Remove All Tags")
+            glyph: "delete"
+            onTriggered: Tags.clearTags(contextMenu.actionPaths)
         }
     }
 
@@ -2800,6 +3255,11 @@ Window {
 
     Shortcut { sequence: "Ctrl+,"; onActivated: preferencesDialog.open() }
     Shortcut { sequence: "Ctrl+?"; onActivated: shortcutsDialog.open() }
+
+    // Pro features.
+    Shortcut { sequence: "Ctrl+P"; enabled: root.pro; onActivated: root.openCommandPalette() }
+    Shortcut { sequence: "F4"; enabled: root.pro; onActivated: root.toggleTerminal() }
+    Shortcut { sequence: "Ctrl+Shift+C"; enabled: root.pro; onActivated: root.comparePanes() }
 
     Shortcut { sequence: "Ctrl+1"; onActivated: root.setViewMode("list") }
     Shortcut { sequence: "Ctrl+2"; onActivated: root.setViewMode("icon") }

@@ -93,6 +93,31 @@ set(OMANTA_SOURCES
     src/SystemTheme.h
     src/UserActions.cpp
     src/UserActions.h
+    src/ProPaths.h
+    src/Frecency.cpp
+    src/Frecency.h
+    src/Tags.cpp
+    src/Tags.h
+    src/GitStatus.cpp
+    src/GitStatus.h
+    src/MediaInfo.cpp
+    src/MediaInfo.h
+    src/SyntaxHighlighter.cpp
+    src/SyntaxHighlighter.h
+    src/FolderCompare.cpp
+    src/FolderCompare.h
+    src/DiskUsage.cpp
+    src/DiskUsage.h
+    src/DuplicateFinder.cpp
+    src/DuplicateFinder.h
+    src/BatchPermissions.cpp
+    src/BatchPermissions.h
+    src/ArchiveBrowser.cpp
+    src/ArchiveBrowser.h
+    src/ShellSession.cpp
+    src/ShellSession.h
+    src/SavedSearches.cpp
+    src/SavedSearches.h
 )
 
 set_source_files_properties(qml/Colors.qml qml/DragState.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -129,6 +154,16 @@ set(OMANTA_QML_FILES
     qml/DialogCloseButton.qml
     qml/PromptDialog.qml
     qml/PreferencesDialog.qml
+    qml/ProFeaturesDialog.qml
+    qml/ProFeatures.js
+    qml/ProMarks.qml
+    qml/CommandPalette.qml
+    qml/CompareDialog.qml
+    qml/DiskUsageDialog.qml
+    qml/DuplicatesDialog.qml
+    qml/BatchPermissionsDialog.qml
+    qml/KeymapEditorDialog.qml
+    qml/TerminalPane.qml
     qml/VisibleColumnsDialog.qml
     qml/ShortcutsDialog.qml
     qml/AboutDialog.qml

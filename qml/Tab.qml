@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import Omanta.Runtime
+import "Keymap.js" as Keymap
 
 // One tab: a location, its history, its view state and its selection.
 // Everything a tab knows lives here, which is what lets windows hold several
@@ -39,6 +40,7 @@ FocusScope {
     // proxy serves as always.
     readonly property bool treeActive: viewMode === "list" && Settings.useTreeView
         && searchQuery === "" && filterText === "" && !viewingStarred && !viewingNetwork
+        && !viewingTag
     // The model the views and every helper below speak to. The two carry the
     // same roles and the same invokable surface, so nothing downstream knows
     // which is live.
@@ -101,6 +103,8 @@ FocusScope {
     property bool showHidden: Settings.showHiddenFiles
     property int sortKey: FileSortFilterModel.ByName
     property bool sortDescending: false
+    // Which media column ByExtra sorts by ("duration", "artist", …).
+    property string extraSortField: ""
 
     // Ctrl+H / menus flip showHidden; persist it like the view mode so new
     // tabs and restarts start where the user left off (Nautilus's
@@ -143,6 +147,15 @@ FocusScope {
 
     readonly property bool viewingStarred: path === "starred:///"
     readonly property bool viewingNetwork: path === "network:///"
+    // Pro: tag:///Red lists every file tagged Red (tag:/// every tagged file).
+    readonly property bool viewingTag: path.startsWith("tag:///")
+    readonly property string viewingTagName: viewingTag ? decodeURIComponent(path.slice(7)) : ""
+
+    // Pro features (main menu → Pro Features), all behind the one switch.
+    readonly property bool pro: Settings.proFeatures
+    // A browsed archive's temporary copy is what this tab shows, or "".
+    readonly property string browsedArchive: pro ? (archiveRevision, ArchiveBrowser.archiveFor(path)) : ""
+    property int archiveRevision: 0
     // Recent rows are pointers: recent:///<id> URIs that no file operation
     // can act on. Everything that leaves this tab — selection, activation,
     // drags — resolves them to the target file, as Nautilus does. Trash rows
@@ -155,14 +168,14 @@ FocusScope {
     // one folder's name list can't answer their conflicts. A tree selection
     // spans folders, which is the same problem.
     readonly property bool batchRenamable: searchQuery === "" && !viewingStarred
-        && !viewingNetwork && !treeActive
+        && !viewingNetwork && !treeActive && !viewingTag
         && path !== "trash:///" && path !== "recent:///"
 
     DirectoryModel {
         id: dirModel
         // starred:/// and network:/// are ours, not GIO's — the directory
         // model must not be asked to enumerate them.
-        path: root.viewingStarred || root.viewingNetwork ? "" : root.path
+        path: root.viewingStarred || root.viewingNetwork || root.viewingTag ? "" : root.path
         // Same three-way policy shape as thumbnails: a remote mount only
         // counts folders when the preference says all locations.
         countItems: Settings.showDirectoryItemCounts === "always"
@@ -189,6 +202,37 @@ FocusScope {
         active: root.viewingStarred
     }
 
+    // A tag's files: the starred listing's machinery over Tags' index.
+    StarredModel {
+        id: taggedModel
+        useCustomPaths: true
+        customPaths: root.viewingTag ? (Tags.revision, Tags.pathsWithTag(root.viewingTagName)) : []
+        active: root.viewingTag
+    }
+
+    // Git badges for the folder on screen (pro), and the names .gitignore
+    // covers for the proxy to hide.
+    GitStatus {
+        id: gitStatus
+        folder: root.path
+        enabled: root.pro && Settings.showGitStatus && root.searchQuery === ""
+                 && Platform.isLocal(root.path)
+    }
+    readonly property alias git: gitStatus
+
+    // The listing changing is the cue to ask git again (debounced there).
+    Connections {
+        target: dirModel
+        enabled: gitStatus.enabled
+        function onCountChanged() { gitStatus.refresh(); }
+        function onDataChanged() { gitStatus.refresh(); }
+    }
+    Connections {
+        target: FileOperations
+        enabled: gitStatus.enabled
+        function onOperationFinished() { gitStatus.refresh(); }
+    }
+
     NetworkModel {
         id: networkModel
         store: ServerStore
@@ -203,12 +247,18 @@ FocusScope {
         // their name role is unique (relative path / URI respectively).
         sourceModel: root.searchQuery !== "" ? searchModel
                    : root.viewingStarred ? starredModel
+                   : root.viewingTag ? taggedModel
                    : root.viewingNetwork ? networkModel : dirModel
         showHidden: root.showHidden
         sortKey: root.sortKey
         sortDescending: root.sortDescending
         nameFilter: root.filterText
         nameFilterMode: root.filterMode
+        hiddenNames: root.pro && Settings.showGitStatus && Settings.hideGitIgnored
+                     && root.searchQuery === "" ? gitStatus.ignoredNames : []
+        // The media columns sort through MediaInfo (pro list view).
+        extraSource: root.pro && root.sortKey === FileSortFilterModel.ByExtra ? MediaInfo : null
+        extraSortField: root.extraSortField
         // Nautilus preference, false out of the box: folders sort with the
         // files unless the user asks otherwise.
         foldersFirst: Settings.sortFoldersFirst
@@ -229,9 +279,16 @@ FocusScope {
         id: history
     }
 
-    Component.onCompleted: history.visit(root.path)
+    Component.onCompleted: {
+        history.visit(root.path);
+        if (root.pro)
+            Frecency.visit(root.path);
+    }
 
     onPathChanged: {
+        // Remembered for the command palette's fuzzy jump (pro).
+        if (root.pro)
+            Frecency.visit(path);
         clearSelection();
         currentIndex = -1;
         searchQuery = ""; // navigating away is leaving the search
@@ -251,8 +308,16 @@ FocusScope {
     Connections {
         target: dirModel
         function onLoadingChanged() {
-            if (dirModel.loading || !root.pendingSelection)
+            if (dirModel.loading)
                 return;
+            // Columns: the column just opened starts on its first item, so
+            // j/k/l carry straight on (Finder does the same).
+            if (!root.pendingSelection) {
+                if (root.viewMode === "columns" && root.currentIndex < 0
+                    && root.selectionCount === 0 && files.count > 0)
+                    root.setCurrent(0, false);
+                return;
+            }
             const row = files.proxyRowForName(root.pendingSelection);
             root.pendingSelection = "";
             if (row >= 0) {
@@ -349,6 +414,10 @@ FocusScope {
         const target = actionPathAt(row);
         if (files.valueAt(row, "isDir")) {
             navigate(target);
+        } else if (root.pro && Platform.isLocal(target)
+                   && Platform.isArchiveType(files.valueAt(row, "contentType"))) {
+            // Pro: an archive opens like a folder (a temporary copy).
+            commandRequested("browseArchive", target);
         } else if (Platform.activationExtracts(files.valueAt(row, "contentType"))) {
             // Nautilus 50: opening an archive extracts it, but only when the
             // file manager itself is the type's default handler (post-cutover
@@ -630,10 +699,12 @@ FocusScope {
         setCurrent(Math.max(0, Math.min(files.count - 1, base + delta)), extend);
     }
 
-    function setSort(key) {
-        if (sortKey === key)
+    function setSort(key, field) {
+        const extra = field || "";
+        if (sortKey === key && extraSortField === extra)
             sortDescending = !sortDescending;
         else {
+            extraSortField = extra;
             sortKey = key;
             sortDescending = false;
         }
@@ -701,6 +772,30 @@ FocusScope {
     // ---- keyboard ---------------------------------------------------------
 
     readonly property bool vimKeys: Settings.keyboardMode === "vim"
+    // Pro: the keymap editor's remaps, and the half-typed mark command
+    // ("'" or "`" waiting for its letter).
+    readonly property var keyRemap: pro ? Keymap.parseRemap(Settings.vimKeyRemap) : null
+    property string pendingMark: ""
+
+    function markKey(kind, letter) {
+        pendingMark = "";
+        if (!/^[a-zA-Z]$/.test(letter))
+            return;
+        if (kind === "'") {
+            if (!Platform.isLocal(path)) {
+                commandRequested("flash", qsTr("Marks remember folders on this computer"));
+                return;
+            }
+            Settings.setMark(letter, path);
+            commandRequested("flash", qsTr("Marked “%1” as %2").arg(title).arg(letter));
+        } else {
+            const target = Settings.mark(letter);
+            if (target !== "" && Platform.isNavigable(target))
+                navigate(target);
+            else
+                commandRequested("flash", qsTr("No folder is marked %1").arg(letter));
+        }
+    }
 
     function cycleSort() {
         const order = [FileSortFilterModel.ByName, FileSortFilterModel.ByModified,
@@ -716,7 +811,14 @@ FocusScope {
     // whether the key was taken. Only modifier-free (or Shift) presses come
     // here, so every Ctrl/Alt shortcut keeps working unchanged.
     function handleVimKey(event) {
-        const t = event.text;
+        // A mark command takes the very next key as its letter, unmapped.
+        if (pendingMark !== "" && event.text.length === 1) {
+            markKey(pendingMark, event.text);
+            return true;
+        }
+        const t = Keymap.translate(keyRemap, event.text);
+        if (t === "" && event.text !== "")
+            return true; // the key's action moved elsewhere: swallow it
         // Grid and Gallery move sideways with h/l; List and Columns go up/in.
         const grid = viewMode === "icon" || viewMode === "gallery";
         switch (t) {
@@ -769,6 +871,16 @@ FocusScope {
         case "q": commandRequested("closeTab", null); return true;
         case "b": commandRequested("sidebar", null); return true;
         case "?": commandRequested("help", null); return true;
+        case ":":
+            if (!pro) return false;
+            commandRequested("palette", null); return true;
+        case "'":
+        case "`":
+            if (!pro) return false;
+            pendingMark = t;
+            commandRequested("flash", t === "'" ? qsTr("Mark this folder as… (a letter)")
+                                                : qsTr("Jump to mark… (a letter)"));
+            return true;
         }
         if (t.length === 1 && t >= "1" && t <= "9") {
             commandRequested("place", parseInt(t));
@@ -901,10 +1013,48 @@ FocusScope {
 
     // ---- the view itself --------------------------------------------------
 
+    // Pro: inside a browsed archive, say so — it's a temporary copy.
+    Rectangle {
+        id: archiveBanner
+        objectName: "archiveBanner"
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        visible: root.browsedArchive !== ""
+        height: visible ? 30 : 0
+        color: Qt.alpha(Colors.accent, 0.12)
+
+        Text {
+            textFormat: Text.PlainText
+            anchors.left: parent.left
+            anchors.leftMargin: 12
+            anchors.right: leaveArchive.left
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Inside “%1” — a temporary copy; changes here aren't saved to the archive")
+                      .arg(Platform.baseName(root.browsedArchive))
+            color: Colors.text
+            font.pixelSize: 12
+            elide: Text.ElideMiddle
+        }
+
+        OmButton {
+            id: leaveArchive
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Leave")
+            onClicked: {
+                root.pendingSelection = Platform.baseName(root.browsedArchive);
+                root.navigate(Platform.parentPath(root.browsedArchive));
+            }
+        }
+    }
+
     Loader {
         id: viewLoader
 
-        anchors.top: parent.top
+        anchors.top: archiveBanner.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: filterBar.visible ? filterBar.top : parent.bottom

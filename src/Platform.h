@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 
 // Small bridge for the things QML cannot do itself: launching files with their
 // default application, opening a terminal, and formatting sizes the way the
@@ -115,6 +116,14 @@ public:
     // Turns whatever the user typed into an absolute path: expands a leading
     // ~, and resolves a relative path against the folder being viewed.
     Q_INVOKABLE QString resolvePath(const QString &input, const QString &base) const;
+
+    // Pro: Tab completion for the location bar, the way a shell does it.
+    // Completes the last component of `input` (relative to `base`, with ~
+    // expanded) against the folders there: one match completes it with a
+    // trailing slash, several complete their common start. Answers
+    // {text, matches}: the new text, keeping the user's ~ form, and the
+    // matching folder names (at most 50).
+    Q_INVOKABLE QVariantMap completePath(const QString &input, const QString &base) const;
 
     // Names that already exist in `destinationDir`. The UI asks about
     // conflicts before starting an operation rather than mid-flight, because a

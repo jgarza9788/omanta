@@ -45,9 +45,29 @@ void StarredModel::setActive(bool active)
         reload();
 }
 
+void StarredModel::setUseCustomPaths(bool use)
+{
+    if (m_useCustomPaths == use)
+        return;
+    m_useCustomPaths = use;
+    Q_EMIT customPathsChanged();
+    if (m_active)
+        reload();
+}
+
+void StarredModel::setCustomPaths(const QStringList &paths)
+{
+    if (m_customPaths == paths)
+        return;
+    m_customPaths = paths;
+    Q_EMIT customPathsChanged();
+    if (m_active && m_useCustomPaths)
+        reload();
+}
+
 void StarredModel::reload()
 {
-    if (!m_store)
+    if (!m_useCustomPaths && !m_store)
         return;
 
     ++m_generation;
@@ -57,7 +77,7 @@ void StarredModel::reload()
     }
     m_cancellable = g_cancellable_new();
 
-    const QStringList paths = m_store->paths();
+    const QStringList paths = m_useCustomPaths ? m_customPaths : m_store->paths();
     m_loading.clear();
     m_loading.resize(paths.size());
     m_outstanding = int(paths.size());

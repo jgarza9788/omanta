@@ -21,6 +21,7 @@ FocusScope {
         if (p.indexOf("trash:") === 0) return "user-trash";
         if (p.indexOf("recent:") === 0) return "document-open-recent";
         if (p.indexOf("starred:") === 0) return "starred";
+        if (p.indexOf("tag:") === 0) return "bookmark";
         if (p.indexOf("://") >= 0) return "network-server";
         const home = Platform.homePath();
         if (p === home || p.indexOf(home + "/") === 0) return "user-home";
@@ -38,7 +39,20 @@ FocusScope {
 
     function cancelEditing() {
         editing = false;
+        completions.close();
         crumbFlick.forceActiveFocus();
+    }
+
+    // Pro: Tab completes the folder name being typed.
+    function complete() {
+        const result = Platform.completePath(editor.text, root.path);
+        editor.text = result.text;
+        editor.cursorPosition = editor.text.length;
+        completions.matches = result.matches;
+        if (result.matches.length > 0)
+            completions.open();
+        else
+            completions.close();
     }
 
     Rectangle {
@@ -211,7 +225,17 @@ FocusScope {
         background: null
         selectByMouse: true
 
+        onTextEdited: completions.close()
+        // Tab completes (pro) rather than moving focus out of the bar.
+        Keys.onTabPressed: event => {
+            if (Settings.proFeatures)
+                root.complete();
+            else
+                event.accepted = false;
+        }
+
         onAccepted: {
+            completions.close();
             root.editing = false;
             // "~/Documents" and "../src" are what people actually type.
             root.navigateRequested(Platform.resolvePath(text, root.path));
@@ -219,5 +243,54 @@ FocusScope {
 
         Keys.onEscapePressed: root.cancelEditing()
         onActiveFocusChanged: if (!activeFocus && root.editing) root.cancelEditing()
+    }
+
+    // The folders a Tab could complete to, when there is more than one.
+    OmPopup {
+        id: completions
+        objectName: "pathCompletions"
+        property var matches: []
+        y: root.height + 4
+        x: 8
+        width: Math.min(root.width - 16, 420)
+        padding: 6
+        focus: false
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+
+        contentItem: Flow {
+            spacing: 4
+            Repeater {
+                model: completions.matches.slice(0, 30)
+                Rectangle {
+                    required property string modelData
+                    width: matchLabel.implicitWidth + 12
+                    height: 22
+                    radius: 4
+                    color: matchMouse.containsMouse ? Colors.hover : Colors.window
+                    border.color: Colors.border
+                    border.width: 1
+                    Text {
+                        id: matchLabel
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        text: modelData + "/"
+                        color: Colors.text
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        id: matchMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            const cut = editor.text.lastIndexOf("/");
+                            editor.text = editor.text.slice(0, cut + 1) + modelData + "/";
+                            completions.close();
+                            editor.forceActiveFocus();
+                            editor.cursorPosition = editor.text.length;
+                        }
+                    }
+                }
+            }
+        }
     }
 }

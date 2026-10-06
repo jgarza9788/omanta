@@ -5,7 +5,10 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QSet>
+#include <QThread>
 #include <QUuid>
+
+#include <algorithm>
 
 namespace {
 
@@ -117,6 +120,10 @@ struct ProgressContext {
 void onCopyProgress(goffset current, goffset, gpointer data)
 {
     auto *ctx = static_cast<ProgressContext *>(data);
+    // Pause and the speed limit act between chunks of a file, so a single
+    // huge copy obeys them too, not only the gaps between files.
+    ctx->worker->waitWhilePaused();
+    ctx->worker->throttle(ctx->doneBefore + qint64(current));
     // Emitting per callback would flood the main thread's event queue on a big
     // file and make the UI *less* responsive, not more.
     if (ctx->throttle->elapsed() < 100)
@@ -187,6 +194,60 @@ void FileOperationWorker::requestCancel()
 void FileOperationWorker::prepare()
 {
     g_cancellable_reset(m_cancellable);
+}
+
+std::atomic_bool &FileOperationWorker::paused()
+{
+    static std::atomic_bool flag(false);
+    return flag;
+}
+
+std::atomic<qint64> &FileOperationWorker::bytesPerSecond()
+{
+    static std::atomic<qint64> limit(0);
+    return limit;
+}
+
+static qint64 monotonicMs()
+{
+    return g_get_monotonic_time() / 1000;
+}
+
+bool FileOperationWorker::waitWhilePaused()
+{
+    bool waited = false;
+    while (paused().load() && !g_cancellable_is_cancelled(m_cancellable)) {
+        QThread::msleep(100);
+        waited = true;
+    }
+    if (waited) {
+        // Time spent paused isn't time the limit should make up for.
+        m_rateStartMs = 0;
+    }
+    return !g_cancellable_is_cancelled(m_cancellable);
+}
+
+void FileOperationWorker::throttle(qint64 bytes)
+{
+    const qint64 limit = bytesPerSecond().load();
+    if (limit <= 0) {
+        m_rateStartMs = 0;
+        return;
+    }
+    if (m_rateStartMs == 0 || bytes < m_rateBase) {
+        m_rateStartMs = monotonicMs();
+        m_rateBase = bytes;
+        return;
+    }
+    // Sleep until the bytes so far fit the rate, in short steps so cancel
+    // and pause stay responsive.
+    while (!g_cancellable_is_cancelled(m_cancellable)) {
+        const qint64 due = m_rateStartMs + (bytes - m_rateBase) * 1000 / limit;
+        const qint64 wait = due - monotonicMs();
+        if (wait <= 0 || paused().load() || bytesPerSecond().load() != limit)
+            break;
+        QThread::msleep(quint64(std::min<qint64>(wait, 100)));
+    }
 }
 
 void FileOperationWorker::run(const FileOperationRequest &request, quint64 id)
@@ -942,8 +1003,9 @@ bool FileOperationWorker::doTransfer(const FileOperationRequest &request, bool r
     QElapsedTimer throttle;
     throttle.start();
     qint64 done = 0;
+    m_rateStartMs = 0;
     for (const PlanItem &item : plan) {
-        if (g_cancellable_is_cancelled(m_cancellable)) {
+        if (!waitWhilePaused() || g_cancellable_is_cancelled(m_cancellable)) {
             *error = QStringLiteral("Cancelled");
             return fail();
         }

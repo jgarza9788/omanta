@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QCollator>
+#include <QPointer>
+#include <QSet>
 #include <QSortFilterProxyModel>
+#include <QTimer>
 #include <QRegularExpression>
 #include <QtQmlIntegration>
 
@@ -25,6 +28,14 @@ class FileSortFilterModel : public QSortFilterProxyModel
     Q_PROPERTY(QString nameFilterError READ nameFilterError NOTIFY nameFilterChanged)
     Q_PROPERTY(bool foldersOnly READ foldersOnly WRITE setFoldersOnly NOTIFY foldersOnlyChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    // Pro: names to leave out of the listing (the files .gitignore covers).
+    Q_PROPERTY(QStringList hiddenNames READ hiddenNames WRITE setHiddenNames NOTIFY hiddenNamesChanged)
+    // Pro: sorting by a value another object knows (MediaInfo's columns).
+    // With sortKey ByExtra, rows order by extraSource.sortValue(filePath,
+    // extraSortField); unknown values go last, and the order is redone when
+    // extraSource emits changed().
+    Q_PROPERTY(QObject *extraSource READ extraSource WRITE setExtraSource NOTIFY extraSortChanged)
+    Q_PROPERTY(QString extraSortField READ extraSortField WRITE setExtraSortField NOTIFY extraSortChanged)
 
 public:
     enum SortKey {
@@ -37,6 +48,7 @@ public:
         ByOwner,
         ByGroup,
         ByPermissions,
+        ByExtra,
     };
     Q_ENUM(SortKey)
 
@@ -65,6 +77,13 @@ public:
     QString nameFilterError() const { return m_nameFilterError; }
 
     int count() const { return rowCount(); }
+
+    QStringList hiddenNames() const { return QStringList(m_hiddenNames.cbegin(), m_hiddenNames.cend()); }
+    void setHiddenNames(const QStringList &names);
+    QObject *extraSource() const { return m_extraSource; }
+    void setExtraSource(QObject *source);
+    QString extraSortField() const { return m_extraSortField; }
+    void setExtraSortField(const QString &field);
 
     // Row translation, needed whenever the view talks to the source model.
     Q_INVOKABLE int sourceRow(int proxyRow) const;
@@ -105,9 +124,12 @@ Q_SIGNALS:
     void foldersOnlyChanged();
     void nameFilterChanged();
     void countChanged();
+    void hiddenNamesChanged();
+    void extraSortChanged();
 
 private:
     void applySort();
+    QVariant extraValue(const QModelIndex &index) const;
 
     SortKey m_sortKey = ByName;
     bool m_sortDescending = false;
@@ -119,4 +141,8 @@ private:
     QRegularExpression m_namePattern;
     QString m_nameFilterError;
     QCollator m_collator;
+    QSet<QString> m_hiddenNames;
+    QPointer<QObject> m_extraSource;
+    QString m_extraSortField;
+    QTimer m_extraResort;
 };

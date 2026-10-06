@@ -11,6 +11,8 @@
 #include "SystemTheme.h"
 #include "ThumbnailProvider.h"
 #include "TestFixture.h"
+#include "ArchiveEngine.h"
+#include "Tags.h"
 
 #include <QDBusConnection>
 #include <QDataStream>
@@ -116,9 +118,11 @@ private Q_SLOTS:
     void dragLabelAndSpringLoadedFolders();
     void dragGestureStartsADrag();
     void polishScreenshots();
+    void proFeaturesInTheWindow();
 
 private:
     QTemporaryDir m_cache;
+    QTemporaryDir m_proDir;
 };
 
 void TestQmlViews::initTestCase()
@@ -130,6 +134,9 @@ void TestQmlViews::initTestCase()
     // Every window offers the Omarchy Toggle-menu row on first launch; these
     // suites must never edit the real desktop's menu or bindings.
     qputenv("OMANTA_SWITCH", "/nonexistent/omanta-switch");
+    // The pro features' state files (frecency, tags, saved searches).
+    QVERIFY(m_proDir.isValid());
+    qputenv("OMANTA_PRO_DIR", m_proDir.path().toUtf8());
     // Space must never reach the real Sushi from a test run.
     qputenv("OMANTA_PREVIEWER_SERVICE",
             QByteArray("org.omarchy.omanta.TestPreviewer") + QByteArray::number(QCoreApplication::applicationPid()));
@@ -428,8 +435,8 @@ static QObject *findDialog(QObject *window, const char *type)
 static void checkDialogsCloseByMouse(QQuickWindow *window)
 {
     const QPoint outside(4, window->height() - 4);
-    for (const char *type : {"AboutDialog", "PreferencesDialog", "ShortcutsDialog",
-                             "VisibleColumnsDialog"}) {
+    for (const char *type : {"AboutDialog", "PreferencesDialog", "ProFeaturesDialog",
+                             "ShortcutsDialog", "VisibleColumnsDialog"}) {
         QObject *dialog = findDialog(window, type);
         QVERIFY2(dialog, type);
         auto *close = qobject_cast<QQuickItem *>(dialog->property("closeButton").value<QObject *>());
@@ -983,6 +990,205 @@ void TestQmlViews::emptyTrashRefreshesOpenViews()
         QCOMPARE(tab->property("statusText").toString(), QStringLiteral("0 items"));
         QCOMPARE(resets.count(), 0);
     }
+}
+
+// Pro features end to end, in a real window: the palette, marks, tags and
+// their view, the terminal pane, browsing an archive, path completion,
+// comparing panes and the dialogs opening cleanly.
+void TestQmlViews::proFeaturesInTheWindow()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign|TypeError|ReferenceError|qml:.*Error|\\.qml:\\d+"));
+    TempTree tree(TempTree::UnderHome);
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    {
+        QFile settingsFile(config.filePath("OMANTA_SETTINGS_FILE"));
+        QVERIFY(settingsFile.open(QIODevice::WriteOnly));
+        settingsFile.write("proFeatures=true\nrestoreSession=false\n");
+    }
+    tree.makeDir("projects/omanta");
+    tree.makeDir("photos");
+    tree.writeFile("notes.txt");
+    tree.writeFile("projects/readme.md");
+    {
+        QFile code(tree.filePath("projects/main.cpp"));
+        QVERIFY(code.open(QIODevice::WriteOnly));
+        code.write("// a comment\nint main() { return \"x\" ? 0 : 1; }\n");
+    }
+    tree.writeFile("pack/inside.txt", 20);
+    tree.writeFile("pack/more.txt", 30);
+    QString error;
+    QVERIFY2(ArchiveEngine::compress({ tree.filePath("pack") }, tree.filePath("bundle.zip"), &error,
+                                     [] { return false; }, [](qint64, qint64) {}), qPrintable(error));
+    QDir(tree.filePath("pack")).removeRecursively();
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.path());
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    auto *settings = engine.singletonInstance<Settings *>("Omanta", "Settings");
+    QVERIFY(settings && settings->proFeatures());
+    auto *tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+    window->requestActivate();
+    tab->forceActiveFocus();
+    QTRY_VERIFY(tab->hasActiveFocus());
+    const auto path = [&] { return window->property("currentPath").toString(); };
+
+    // Visiting folders feeds the palette; Ctrl+P, a few letters, Enter.
+    tab->setProperty("path", tree.filePath("projects/omanta"));
+    QTRY_COMPARE(path(), tree.filePath("projects/omanta"));
+    tab->setProperty("path", tree.path());
+    QTRY_COMPARE(path(), tree.path());
+    tab->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_P, Qt::ControlModifier);
+    QTRY_VERIFY(window->property("commandPaletteOpen").toBool());
+    for (const QChar c : QStringLiteral("omant"))
+        QTest::keyClick(window, c.toLatin1());
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(!window->property("commandPaletteOpen").toBool());
+    QTRY_COMPARE(path(), tree.filePath("projects/omanta"));
+
+    // An action from the palette: `:` in vim keys, then "split".
+    tab->forceActiveFocus();
+    QTest::keyClick(window, ':');
+    QTRY_VERIFY(window->property("commandPaletteOpen").toBool());
+    for (const QChar c : QStringLiteral("split view"))
+        QTest::keyClick(window, c.toLatin1());
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_VERIFY(window->property("splitOpen").toBool());
+
+    // Compare the panes (both on the same folder: it says so, no crash).
+    QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
+    auto *compare = window->findChild<QObject *>("compareDialog");
+    QVERIFY(compare);
+    QTRY_VERIFY(compare->property("opened").toBool());
+    QVERIFY(QMetaObject::invokeMethod(compare, "close"));
+    QTRY_VERIFY(!compare->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_F3);
+    QTRY_VERIFY(!window->property("splitOpen").toBool());
+    tab = qobject_cast<QQuickItem *>(window->property("currentTab").value<QObject *>());
+
+    // Vim marks: ' a here, go elsewhere, ` a comes back.
+    tab->forceActiveFocus();
+    QTest::keyClick(window, '\'');
+    QTest::keyClick(window, 'a');
+    QTRY_COMPARE(settings->mark("a"), tree.filePath("projects/omanta"));
+    tab->setProperty("path", tree.path());
+    QTRY_COMPARE(path(), tree.path());
+    tab->forceActiveFocus();
+    QTest::keyClick(window, '`');
+    QTest::keyClick(window, 'a');
+    QTRY_COMPARE(path(), tree.filePath("projects/omanta"));
+    tab->setProperty("path", tree.path());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+
+    // Tags: tag a file, and its tag's view lists it.
+    auto *tags = engine.singletonInstance<Tags *>("Omanta", "Tags");
+    QVERIFY(tags);
+    if (Tags::writeAttribute(tree.filePath("notes.txt"), {})) {
+        tags->setTag({ tree.filePath("notes.txt") }, "Green", true);
+        QCOMPARE(Tags::readAttribute(tree.filePath("notes.txt")), QStringList{ "Green" });
+        tab->setProperty("path", QStringLiteral("tag:///Green"));
+        QTRY_COMPARE(window->property("visibleCount").toInt(), 1);
+        QCOMPARE(window->property("viewWritable").toBool(), false);
+        tab->setProperty("path", tree.path());
+        QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+    }
+
+    // The terminal pane runs in the tab's folder; cd moves the tab.
+    QTest::keyClick(window, Qt::Key_F4);
+    QTRY_VERIFY(window->property("terminalOpen").toBool());
+    auto *pane = window->findChild<QObject *>("terminalPane");
+    QVERIFY(pane);
+    auto *session = pane->property("session").value<QObject *>();
+    QVERIFY(session);
+    QVERIFY(QMetaObject::invokeMethod(session, "run", Q_ARG(QString, QStringLiteral("ls"))));
+    QTRY_VERIFY(session->property("output").toString().contains("notes.txt"));
+    QVERIFY(QMetaObject::invokeMethod(session, "run", Q_ARG(QString, QStringLiteral("cd photos"))));
+    QTRY_COMPARE(path(), tree.filePath("photos"));
+    QTest::keyClick(window, Qt::Key_F4);
+    QTRY_VERIFY(!window->property("terminalOpen").toBool());
+    tab->setProperty("path", tree.path());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+
+    // Enter on an archive browses it: a temporary copy, with the banner.
+    tab->forceActiveFocus();
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("bundle.zip"))));
+    int archiveIndex = -1;
+    QMetaObject::invokeMethod(tab->property("files").value<QObject *>(), "proxyRowForName",
+                              Q_RETURN_ARG(int, archiveIndex), Q_ARG(QString, QStringLiteral("bundle.zip")));
+    QVERIFY(archiveIndex >= 0);
+    QVERIFY(QMetaObject::invokeMethod(tab, "activate", Q_ARG(QVariant, archiveIndex)));
+    QTRY_VERIFY(path().contains(QLatin1String("/omanta/archives/")));
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 2);
+    QCOMPARE(tab->property("browsedArchive").toString(), tree.filePath("bundle.zip"));
+    QVERIFY(QFileInfo::exists(tree.filePath("bundle.zip")));
+
+    // Path completion: Ctrl+L, a partial name, Tab.
+    tab->setProperty("path", tree.path());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+    auto *pathBar = window->findChild<QQuickItem *>("pathBar");
+    QVERIFY(pathBar);
+    QTest::keyClick(window, Qt::Key_L, Qt::ControlModifier);
+    QTRY_VERIFY(pathBar->property("editing").toBool());
+    QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+    for (const QChar c : tree.filePath("proj"))
+        QTest::keyClick(window, c.toLatin1());
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(path(), tree.filePath("projects"));
+
+    // Quick view on source code: highlighted, and no crash while the
+    // highlighter is rebuilt as its colours and text arrive (it once
+    // deleted itself twice here).
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 3);
+    tab->forceActiveFocus();
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("main.cpp"))));
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_VERIFY(window->property("quickViewOpen").toBool());
+    QObject *highlighter = nullptr;
+    QTRY_VERIFY((highlighter = window->findChild<QObject *>("syntaxHighlighter")));
+    QTRY_COMPARE(highlighter->property("language").toString(), QStringLiteral("cpp"));
+    QTest::qWait(200);
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!window->property("quickViewOpen").toBool());
+
+    // The scan dialogs open and finish on a real folder.
+    tab->setProperty("path", tree.path());
+    QTRY_COMPARE(window->property("visibleCount").toInt(), 4);
+    QVERIFY(QMetaObject::invokeMethod(window, "showDiskUsage"));
+    auto *usage = window->findChild<QObject *>("diskUsageDialog");
+    QTRY_VERIFY(usage->property("opened").toBool());
+    QVERIFY(QMetaObject::invokeMethod(usage, "close"));
+    QVERIFY(QMetaObject::invokeMethod(window, "findDuplicates"));
+    auto *duplicates = window->findChild<QObject *>("duplicatesDialog");
+    QTRY_VERIFY(duplicates->property("opened").toBool());
+    QVERIFY(QMetaObject::invokeMethod(duplicates, "close"));
+
+    // Turning pro off hides it all again: Ctrl+P does nothing.
+    settings->setProFeatures(false);
+    tab->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_P, Qt::ControlModifier);
+    QTest::qWait(100);
+    QVERIFY(!window->property("commandPaletteOpen").toBool());
 }
 
 QTEST_MAIN(TestQmlViews)
@@ -2193,6 +2399,9 @@ void TestQmlViews::columnsAndGalleryViews()
     QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a/b/c"));
     QTRY_COMPARE(countByObjectName(window->contentItem(), "ancestorColumn"), crumbs);
     QTRY_COMPARE(window->property("visibleCount").toInt(), 1);
+    // The new column starts on its first item, with no key pressed.
+    QTRY_COMPARE(name(), QStringLiteral("deep.txt"));
+    QCOMPARE(tab->property("selectionCount").toInt(), 1);
     QTest::keyClick(window, 'j');
     QTRY_COMPARE(name(), QStringLiteral("deep.txt"));
     QTRY_COMPARE(tab->property("viewPreviewLocation").toString(), tree.filePath("a/b/c/deep.txt"));
@@ -2206,6 +2415,7 @@ void TestQmlViews::columnsAndGalleryViews()
     QTest::keyClick(window, Qt::Key_Right); // → into b
     QTRY_COMPARE(window->property("currentPath").toString(), tree.filePath("a/b"));
     QTRY_COMPARE(window->property("visibleCount").toInt(), 3);
+    QTRY_COMPARE(name(), QStringLiteral("c")); // first item of the new column
 
     // ---- Gallery ----
     QTest::keyClick(window, Qt::Key_4, Qt::ControlModifier);
@@ -2457,6 +2667,34 @@ void TestQmlViews::polishScreenshots()
     QVERIFY(QMetaObject::invokeMethod(prefs, "open"));
     shoot("preferences");
     QVERIFY(QMetaObject::invokeMethod(prefs, "close"));
+
+    auto *pro = window->findChild<QObject *>("proFeaturesDialog");
+    QVERIFY(QMetaObject::invokeMethod(pro, "open"));
+    shoot("pro-features-off");
+    window->findChild<QObject *>("proFeaturesSwitch")->setProperty("checked", true);
+    QVERIFY(QMetaObject::invokeMethod(window->findChild<QObject *>("proFeaturesSwitch"), "toggled"));
+    shoot("pro-features-on");
+    QVERIFY(QMetaObject::invokeMethod(pro, "close"));
+
+    // The pro surfaces themselves, with the switch on.
+    QVERIFY(QMetaObject::invokeMethod(window, "openCommandPalette"));
+    shoot("pro-palette");
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(QMetaObject::invokeMethod(window, "toggleTerminal"));
+    auto *shellPane = window->findChild<QObject *>("terminalPane");
+    QVERIFY(QMetaObject::invokeMethod(shellPane->property("session").value<QObject *>(), "run",
+                                      Q_ARG(QString, QStringLiteral("ls -l"))));
+    QTest::qWait(400);
+    shoot("pro-terminal");
+    QVERIFY(QMetaObject::invokeMethod(window, "toggleTerminal"));
+    QVERIFY(QMetaObject::invokeMethod(window, "showDiskUsage"));
+    QTest::qWait(500);
+    shoot("pro-disk-usage");
+    QVERIFY(QMetaObject::invokeMethod(window->findChild<QObject *>("diskUsageDialog"), "close"));
+    QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("report.txt"))));
+    QVERIFY(QMetaObject::invokeMethod(tab, "requestContextMenu"));
+    shoot("pro-context-menu");
+    QTest::keyClick(window, Qt::Key_Escape);
 
     QVERIFY(QMetaObject::invokeMethod(tab, "selectOnly", Q_ARG(QVariant, QStringLiteral("report.txt"))));
     QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);

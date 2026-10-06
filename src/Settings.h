@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 #include <QtQmlIntegration>
 
 class QFileSystemWatcher;
@@ -80,6 +81,19 @@ class Settings : public QObject
     Q_PROPERTY(QString springLoadDelay READ springLoadDelay WRITE setSpringLoadDelay NOTIFY changed)
     // The right-hand info panel (F11).
     Q_PROPERTY(bool showInfoPanel READ showInfoPanel WRITE setShowInfoPanel NOTIFY changed)
+    // The Pro Features panel's master switch: off by default, and every pro
+    // feature stays out of the way until it is on.
+    Q_PROPERTY(bool proFeatures READ proFeatures WRITE setProFeatures NOTIFY changed)
+    // Pro feature options. Verify After Copy and the copy speed limit
+    // ("off" or MB/s) for the operation queue; Git badges, and whether files
+    // .gitignore covers are hidden; the extra media columns shown in the
+    // list view; vim key remaps ("action=key;…", see Keymap.js).
+    Q_PROPERTY(bool verifyCopies READ verifyCopies WRITE setVerifyCopies NOTIFY changed)
+    Q_PROPERTY(QString transferSpeedLimit READ transferSpeedLimit WRITE setTransferSpeedLimit NOTIFY changed)
+    Q_PROPERTY(bool showGitStatus READ showGitStatus WRITE setShowGitStatus NOTIFY changed)
+    Q_PROPERTY(bool hideGitIgnored READ hideGitIgnored WRITE setHideGitIgnored NOTIFY changed)
+    Q_PROPERTY(QStringList proListColumns READ proListColumns WRITE setProListColumns NOTIFY changed)
+    Q_PROPERTY(QString vimKeyRemap READ vimKeyRemap WRITE setVimKeyRemap NOTIFY changed)
 
     // Bookkeeping, not a preference: the Toggle-menu row is added on first
     // launch only, so removing it sticks.
@@ -109,6 +123,20 @@ public:
     QString previewer() const { return choiceFor("previewer", {"builtin", "sushi"}); }
     bool restoreSession() const { return boolFor("restoreSession", true); }
     bool showInfoPanel() const { return boolFor("showInfoPanel", false); }
+    bool proFeatures() const { return boolFor("proFeatures", false); }
+    bool verifyCopies() const { return boolFor("verifyCopies", false); }
+    QString transferSpeedLimit() const
+    { return choiceFor("transferSpeedLimit", {"off", "100", "50", "20", "10", "5", "1"}); }
+    bool showGitStatus() const { return boolFor("showGitStatus", true); }
+    bool hideGitIgnored() const { return boolFor("hideGitIgnored", false); }
+    QStringList proListColumns() const;
+    QString vimKeyRemap() const { return m_values.value(QStringLiteral("vimKeyRemap")); }
+    // The extra columns the pro list view can show, in order.
+    Q_INVOKABLE static QStringList allProListColumns();
+    // Vim marks: a letter → a folder, remembered across restarts.
+    Q_INVOKABLE QString mark(const QString &letter) const;
+    Q_INVOKABLE void setMark(const QString &letter, const QString &path);
+    Q_INVOKABLE QVariantMap marks() const;
     QString springLoadDelay() const { return choiceFor("springLoadDelay", {"3", "1.5", "0.75", "off"}); }
     // Bookkeeping: the windows/tabs to restore, as one JSON line. Not a
     // property — nothing binds to it, and writing it must not re-evaluate
@@ -144,6 +172,13 @@ public:
     void setPreviewer(const QString &value) { set("previewer", value); }
     void setRestoreSession(bool value) { set("restoreSession", value ? "true" : "false"); }
     void setShowInfoPanel(bool value) { set("showInfoPanel", value ? "true" : "false"); }
+    void setProFeatures(bool value) { set("proFeatures", value ? "true" : "false"); }
+    void setVerifyCopies(bool value) { set("verifyCopies", value ? "true" : "false"); }
+    void setTransferSpeedLimit(const QString &value) { set("transferSpeedLimit", value); }
+    void setShowGitStatus(bool value) { set("showGitStatus", value ? "true" : "false"); }
+    void setHideGitIgnored(bool value) { set("hideGitIgnored", value ? "true" : "false"); }
+    void setProListColumns(const QStringList &value) { set("proListColumns", value.join(QLatin1Char(','))); }
+    void setVimKeyRemap(const QString &value) { set("vimKeyRemap", value); }
     void setSpringLoadDelay(const QString &value) { set("springLoadDelay", value); }
     void setIconZoom(int value) { set("iconZoom", QString::number(value)); }
     void setListZoom(int value) { set("listZoom", QString::number(value)); }

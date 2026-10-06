@@ -28,6 +28,8 @@ Rectangle {
     signal opsPopoverClosed()
     // Keyboard browsing (vim `b`) ended — the window hands the keys back.
     signal keyboardReleased()
+    // Pro: a saved search was clicked; the window runs it.
+    signal savedSearchRequested(var search)
 
     readonly property bool keyboardActive: list.activeFocus
 
@@ -94,7 +96,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: opsArea.top
+        anchors.bottom: proSection.top
         anchors.topMargin: 6
         anchors.bottomMargin: 6
         anchors.leftMargin: 6
@@ -292,6 +294,127 @@ Rectangle {
         }
     }
 
+    // Pro: coloured tags in use and saved searches, under the places.
+    Column {
+        id: proSection
+        objectName: "proSidebarSection"
+
+        readonly property bool any: Settings.proFeatures
+            && (Tags.usedTags.length > 0 || SavedSearches.searches.length > 0)
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: opsArea.top
+        anchors.leftMargin: 6
+        anchors.rightMargin: 7
+        visible: any
+        height: any ? implicitHeight + 6 : 0
+        spacing: 0
+
+        Rectangle {
+            width: parent.width - 16
+            x: 8
+            height: 1
+            color: Colors.border
+        }
+        Item { width: 1; height: 6 }
+
+        component ProRow: Rectangle {
+            id: proRow
+            property string label: ""
+            property string location: ""
+            property color dot: "transparent"
+            property string glyph: ""
+            signal activated()
+            signal menuRequested()
+            readonly property bool current: location !== "" && location === root.currentLocation
+
+            width: parent.width
+            height: 28
+            radius: Colors.radius
+            color: current ? Colors.selection : proMouse.containsMouse ? Colors.hover : "transparent"
+
+            Rectangle {
+                id: proDot
+                visible: proRow.glyph === ""
+                anchors.left: parent.left
+                anchors.leftMargin: 11
+                anchors.verticalCenter: parent.verticalCenter
+                width: 10
+                height: 10
+                radius: 5
+                color: proRow.dot
+            }
+            Image {
+                id: proIcon
+                visible: proRow.glyph !== ""
+                anchors.left: parent.left
+                anchors.leftMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                sourceSize: Qt.size(16, 16)
+                source: proRow.glyph !== "" ? Colors.tint("image://fileicon/" + proRow.glyph,
+                                                          proRow.current ? Colors.selectionText : Colors.textDim)
+                                            : ""
+            }
+            Text {
+                textFormat: Text.PlainText
+                anchors.left: parent.left
+                anchors.leftMargin: 32
+                anchors.right: parent.right
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: proRow.label
+                color: proRow.current ? Colors.selectionText : Colors.text
+                font.pixelSize: 13
+                elide: Text.ElideMiddle
+            }
+            MouseArea {
+                id: proMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: mouse => mouse.button === Qt.RightButton ? proRow.menuRequested()
+                                                                    : proRow.activated()
+            }
+        }
+
+        Repeater {
+            model: Settings.proFeatures ? Tags.usedTags : []
+            ProRow {
+                required property string modelData
+                label: modelData
+                dot: Tags.colorFor(modelData)
+                location: "tag:///" + encodeURIComponent(modelData)
+                onActivated: root.navigateRequested(location)
+            }
+        }
+
+        Repeater {
+            model: Settings.proFeatures ? SavedSearches.searches : []
+            ProRow {
+                required property var modelData
+                label: modelData.name
+                glyph: "search"
+                onActivated: root.savedSearchRequested(modelData)
+                onMenuRequested: {
+                    savedSearchMenu.searchId = modelData.id;
+                    savedSearchMenu.popup();
+                }
+            }
+        }
+
+        OmMenu {
+            id: savedSearchMenu
+            property string searchId: ""
+            OmMenuItem {
+                text: qsTr("Remove Saved Search")
+                glyph: "delete"
+                destructive: true
+                onTriggered: SavedSearches.remove(savedSearchMenu.searchId)
+            }
+        }
+    }
+
     // Nautilus 50's operations indicator: progress lives at the bottom of the
     // sidebar — one row per operation, a pie that fills as it runs beside a
     // live short status ("Copying “name”"). Click for the per-operation
@@ -450,6 +573,49 @@ Rectangle {
             contentItem: Column {
                 spacing: 12
 
+                // Pro: the queue's controls — pause everything, and cap
+                // how fast copies go so the disk stays usable meanwhile.
+                Row {
+                    visible: Settings.proFeatures
+                    width: 340 - 28
+                    spacing: 8
+
+                    OmButton {
+                        objectName: "queuePauseButton"
+                        text: FileOperations.paused ? qsTr("Resume") : qsTr("Pause")
+                        primary: FileOperations.paused
+                        implicitHeight: 28
+                        onClicked: FileOperations.paused = !FileOperations.paused
+                    }
+
+                    Text {
+                        textFormat: Text.PlainText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Speed")
+                        color: Colors.textDim
+                        font.pixelSize: 12
+                    }
+
+                    OmComboBox {
+                        id: speedCombo
+                        width: 120
+                        anchors.verticalCenter: parent.verticalCenter
+                        readonly property var values: ["off", "100", "50", "20", "10", "5", "1"]
+                        model: [qsTr("No limit"), "100 MB/s", "50 MB/s", "20 MB/s", "10 MB/s",
+                                "5 MB/s", "1 MB/s"]
+                        currentIndex: Math.max(0, values.indexOf(Settings.transferSpeedLimit))
+                        onActivated: Settings.transferSpeedLimit = values[currentIndex]
+                    }
+                }
+
+                Text {
+                    textFormat: Text.PlainText
+                    visible: Settings.proFeatures && FileOperations.verifying
+                    text: qsTr("Verifying copies…")
+                    color: Colors.accent
+                    font.pixelSize: 12
+                }
+
                 Text {
                     textFormat: Text.PlainText
                     visible: FileOperations.operations.length === 0
@@ -473,13 +639,41 @@ Rectangle {
 
                             Text {
                                 textFormat: Text.PlainText
-                                width: parent.width - 22
+                                width: parent.width - 22 - (queueArrows.visible ? queueArrows.width + 6 : 0)
                                 text: modelData.state === "queued"
                                       ? modelData.label + qsTr(" — waiting")
+                                      : modelData.state === "paused"
+                                      ? modelData.label + qsTr(" — paused")
                                       : modelData.label
                                 color: Colors.text
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
+                            }
+
+                            // Pro: reorder what's waiting.
+                            Row {
+                                id: queueArrows
+                                visible: Settings.proFeatures && modelData.movable === true
+                                spacing: 4
+                                Repeater {
+                                    model: [{ symbol: "▲", delta: -1 }, { symbol: "▼", delta: 1 }]
+                                    Text {
+                                        required property var modelData
+                                        textFormat: Text.PlainText
+                                        text: modelData.symbol
+                                        color: arrowMouse.containsMouse ? Colors.text : Colors.textDim
+                                        font.pixelSize: 10
+                                        MouseArea {
+                                            id: arrowMouse
+                                            anchors.fill: parent
+                                            anchors.margins: -3
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: FileOperations.moveOperation(queueArrows.parent.parent.modelData.id,
+                                                                                    modelData.delta)
+                                        }
+                                    }
+                                }
                             }
 
                             // Per-operation cancel: interrupts the

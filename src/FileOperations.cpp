@@ -1,7 +1,11 @@
 #include "FileOperations.h"
 
+#include "Checksum.h"
 #include "FileOperationWorker.h"
 #include "Location.h"
+
+#include <QCoreApplication>
+#include <QPointer>
 
 #include <QDir>
 #include <QFileInfo>
@@ -125,6 +129,97 @@ void FileOperations::clearError()
     setError(QString());
 }
 
+void FileOperations::setPaused(bool paused)
+{
+    if (m_paused == paused)
+        return;
+    m_paused = paused;
+    FileOperationWorker::paused().store(paused);
+    Q_EMIT pausedChanged();
+    Q_EMIT operationsChanged();
+    // Resuming an idle queue starts whatever waited behind the pause.
+    if (!paused && !m_busy && !m_awaitingAnswer && !m_queue.isEmpty())
+        startNext();
+}
+
+void FileOperations::setSpeedLimit(qint64 bytesPerSecond)
+{
+    bytesPerSecond = std::max<qint64>(0, bytesPerSecond);
+    if (m_speedLimit == bytesPerSecond)
+        return;
+    m_speedLimit = bytesPerSecond;
+    FileOperationWorker::bytesPerSecond().store(bytesPerSecond);
+    Q_EMIT speedLimitChanged();
+}
+
+void FileOperations::setVerifyCopies(bool verify)
+{
+    if (m_verifyCopies == verify)
+        return;
+    m_verifyCopies = verify;
+    Q_EMIT verifyCopiesChanged();
+}
+
+void FileOperations::moveOperation(double id, int delta)
+{
+    const quint64 wanted = quint64(id);
+    for (int i = 0; i < m_queue.size(); ++i) {
+        if (m_queue.at(i).id != wanted)
+            continue;
+        const int to = std::clamp(i + (delta < 0 ? -1 : 1), 0, int(m_queue.size()) - 1);
+        if (to != i) {
+            m_queue.move(i, to);
+            Q_EMIT operationsChanged();
+        }
+        return;
+    }
+}
+
+QStringList FileOperations::mismatchedCopies(const QList<QPair<QString, QString>> &pairs)
+{
+    QStringList mismatched;
+    std::atomic_bool stop(false);
+    for (const auto &pair : pairs) {
+        QString sourceError;
+        QString copyError;
+        const QString a = Checksum::compute(pair.first, QCryptographicHash::Sha256, stop, {}, &sourceError);
+        const QString b = Checksum::compute(pair.second, QCryptographicHash::Sha256, stop, {}, &copyError);
+        if (a.isEmpty() || b.isEmpty() || a != b)
+            mismatched << pair.second;
+    }
+    return mismatched;
+}
+
+void FileOperations::verify(const FileOperationResult &result)
+{
+    QList<QPair<QString, QString>> pairs;
+    for (const TransferEntry &entry : result.transfers) {
+        // Local files only: hashing across a network share twice is a stall.
+        if (!entry.directory && entry.source.startsWith(QLatin1Char('/'))
+            && entry.destination.startsWith(QLatin1Char('/')))
+            pairs.append({ entry.source, entry.destination });
+    }
+    if (pairs.isEmpty())
+        return;
+    ++m_verifying;
+    if (m_verifying == 1)
+        Q_EMIT verifyingChanged();
+    QPointer<FileOperations> self(this);
+    QThread *thread = QThread::create([self, pairs] {
+        const QStringList mismatched = mismatchedCopies(pairs);
+        QMetaObject::invokeMethod(qApp, [self, mismatched, count = int(pairs.size())] {
+            if (!self)
+                return;
+            --self->m_verifying;
+            if (self->m_verifying == 0)
+                Q_EMIT self->verifyingChanged();
+            Q_EMIT self->verificationFinished(count, mismatched);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
 void FileOperations::enqueue(const FileOperationRequest &request, QObject *requester)
 {
     // A fresh operation forks history: whatever was undone can no longer be
@@ -145,7 +240,7 @@ void FileOperations::enqueuePending(Pending pending)
         pending.originalRequest = pending.request;
     pending.id = m_nextId++;
     m_queue.enqueue(pending);
-    if (!m_busy && !m_awaitingAnswer)
+    if (!m_busy && !m_awaitingAnswer && !m_paused)
         startNext();
     else
         Q_EMIT operationsChanged(); // startNext announces its own pick
@@ -160,8 +255,8 @@ QVariantList FileOperations::operations() const
         running.insert(QStringLiteral("label"), m_current.request.describe());
         running.insert(QStringLiteral("shortStatus"), m_awaitingAnswer
             ? waitingStatus() : m_current.request.shortStatus());
-        running.insert(QStringLiteral("state"), m_awaitingAnswer
-            ? QStringLiteral("waiting") : QStringLiteral("running"));
+        running.insert(QStringLiteral("state"), m_awaitingAnswer ? QStringLiteral("waiting")
+                       : m_paused ? QStringLiteral("paused") : QStringLiteral("running"));
         running.insert(QStringLiteral("progress"), m_progress);
         running.insert(QStringLiteral("detail"), m_currentDetail);
         const qint64 elapsed = m_currentClock.isValid() ? m_currentClock.elapsed() : 0;
@@ -177,6 +272,7 @@ QVariantList FileOperations::operations() const
         queued.insert(QStringLiteral("label"), pending.request.describe());
         queued.insert(QStringLiteral("shortStatus"), pending.request.shortStatus());
         queued.insert(QStringLiteral("state"), QStringLiteral("queued"));
+        queued.insert(QStringLiteral("movable"), true);
         queued.insert(QStringLiteral("progress"), 0.0);
         queued.insert(QStringLiteral("detail"), QString());
         queued.insert(QStringLiteral("transferred"), QString());
@@ -248,6 +344,13 @@ void FileOperations::startNext()
 {
     if (m_awaitingAnswer)
         return;
+    // A paused queue finishes nothing new; the waiting rows stay listed.
+    if (m_paused && !m_queue.isEmpty()) {
+        setBusy(false);
+        setStatus(QString(), 0.0);
+        Q_EMIT operationsChanged();
+        return;
+    }
     if (m_queue.isEmpty()) {
         setBusy(false);
         setStatus(QString(), 0.0);
@@ -302,6 +405,8 @@ void FileOperations::handleSuccess(quint64 id, const FileOperationResult &result
         combined.sources = m_current.completed.sources + result.sources;
         combined.created = m_current.completed.created + result.created;
         recordUndo(m_current.originalRequest, combined);
+        if (m_verifyCopies && m_current.request.kind == FileOperationRequest::Copy)
+            verify(result);
     }
 
     Q_EMIT operationFinished(m_current.request.describe());

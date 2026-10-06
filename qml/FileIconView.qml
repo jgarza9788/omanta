@@ -169,6 +169,18 @@ Item {
                     asynchronous: true
                     cache: true
                     onStatusChanged: if (status === Image.Error && wantThumbnail) failedSource = thumbnailSource
+
+                    // Pro: tag dots and the git badge on the icon's corner,
+                    // so they never push the grid around.
+                    ProMarks {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.rightMargin: -4
+                        tab: root.tab
+                        name: cell.name
+                        filePath: cell.targetPath !== "" ? cell.targetPath : cell.filePath
+                        compact: true
+                    }
                 }
 
                 Text {

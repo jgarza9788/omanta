@@ -2,6 +2,8 @@
 
 #include <QObject>
 
+#include <atomic>
+
 #include <gio/gio.h>
 
 #include "FileOperationTypes.h"
@@ -30,6 +32,17 @@ public:
     void requestCancel();
     // Main thread, before dispatch; the token stays alive for the worker lifetime.
     void prepare();
+
+    // The operation queue's controls, read by the copy loop on the worker
+    // thread: a paused transfer waits between chunks (cancel still works),
+    // and a non-zero limit holds copies to that many bytes per second.
+    static std::atomic_bool &paused();
+    static std::atomic<qint64> &bytesPerSecond();
+    // Blocks while paused; false once cancelled. Worker thread only.
+    bool waitWhilePaused();
+    // Sleeps as needed to keep `bytes` done since the transfer started under
+    // the limit. Worker thread only.
+    void throttle(qint64 bytes);
 
 public Q_SLOTS:
     void run(const FileOperationRequest &request, quint64 id);
@@ -83,6 +96,9 @@ private:
     bool deleteRecursively(GFile *file, QString *error);
 
     GCancellable *m_cancellable = nullptr;
+    // Throttle bookkeeping for the running transfer.
+    qint64 m_rateBase = 0;
+    qint64 m_rateStartMs = 0;
     // Set by doExtract when the failure is a missing/wrong archive password
     // or an expansion needing consent; run() turns it into passphraseNeeded()
     // or expansionConfirmationNeeded() instead of failed().

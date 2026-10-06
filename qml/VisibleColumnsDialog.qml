@@ -32,6 +32,18 @@ OmDialog {
         created: qsTr("Created"), accessed: qsTr("Accessed")
     })
 
+    // Pro: the media columns, shown after the regular ones.
+    readonly property var proLabels: ({
+        dimensions: qsTr("Dimensions (pictures, video)"), duration: qsTr("Length (audio, video)"),
+        artist: qsTr("Artist"), album: qsTr("Album"), photoDate: qsTr("Photo Taken (JPEG)")
+    })
+    function setProColumn(id, on) {
+        const next = Settings.proListColumns.filter(c => c !== id);
+        if (on)
+            next.push(id);
+        Settings.proListColumns = next;
+    }
+
     onAboutToShow: {
         rows.clear();
         const visible = Settings.listVisibleColumns;
@@ -122,6 +134,51 @@ OmDialog {
                                 rows.move(row.index, row.index + 1, 1);
                                 root.apply();
                             }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                textFormat: Text.PlainText
+                visible: Settings.proFeatures
+                width: parent.width
+                topPadding: 12
+                text: qsTr("Media (Pro)")
+                color: Colors.text
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            Repeater {
+                model: Settings.proFeatures ? Settings.allProListColumns() : []
+
+                delegate: Rectangle {
+                    id: proRow
+                    required property string modelData
+                    width: parent.width
+                    height: 40
+                    radius: Colors.radius
+                    color: Colors.chrome
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        spacing: 4
+
+                        CheckBox {
+                            checked: Settings.proListColumns.indexOf(proRow.modelData) >= 0
+                            onToggled: root.setProColumn(proRow.modelData, checked)
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: root.proLabels[proRow.modelData] ?? proRow.modelData
+                            color: Colors.text
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
                         }
                     }
                 }

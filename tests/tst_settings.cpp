@@ -259,6 +259,10 @@ void TestSettings::keyboardAndPreviewDefaultsAndValidation()
     QCOMPARE(fresh.previewer(), QStringLiteral("builtin"));
     QCOMPARE(fresh.restoreSession(), true);
     QCOMPARE(fresh.showInfoPanel(), false);
+    QCOMPARE(fresh.proFeatures(), false);
+
+    fresh.setProFeatures(true);
+    QCOMPARE(Settings().proFeatures(), true);
 
     fresh.setKeyboardMode(QStringLiteral("classic"));
     fresh.setPreviewer(QStringLiteral("sushi"));
@@ -273,8 +277,9 @@ void TestSettings::keyboardAndPreviewDefaultsAndValidation()
     fresh.setDefaultViewMode(QStringLiteral("gallery"));
     QCOMPARE(Settings().defaultViewMode(), QStringLiteral("gallery"));
 
-    write("keyboardMode=emacs\npreviewer=qlmanage\ndefaultViewMode=coverflow\n");
+    write("keyboardMode=emacs\npreviewer=qlmanage\ndefaultViewMode=coverflow\nproFeatures=yes\n");
     Settings garbage;
+    QCOMPARE(garbage.proFeatures(), false);
     QCOMPARE(garbage.keyboardMode(), QStringLiteral("vim"));
     QCOMPARE(garbage.previewer(), QStringLiteral("builtin"));
     QCOMPARE(garbage.defaultViewMode(), QStringLiteral("icon"));

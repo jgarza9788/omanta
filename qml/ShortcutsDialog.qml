@@ -23,8 +23,11 @@ OmDialog {
     readonly property Item closeButton: DialogCloseButton { dialog: root }
     title: qsTr("Keyboard Shortcuts")
 
+    // Pro: the keymap editor, from the button under the list.
+    signal editKeysRequested()
+
     // Keymap.js is the one table; vim keys lead while they are on.
-    readonly property var allGroups: Keymap.groups(Settings.keyboardMode)
+    readonly property var allGroups: Keymap.groups(Settings.keyboardMode, Settings.proFeatures)
 
     // The search: every word must appear in the key or its description
     // ("tab new", "ctrl z", "pane"). Groups with nothing left disappear.
@@ -148,6 +151,17 @@ OmDialog {
                 }
 
                 Item { width: 1; height: 8 }
+            }
+        }
+
+        OmButton {
+            objectName: "editKeysButton"
+            visible: Settings.proFeatures && Settings.keyboardMode === "vim"
+            Layout.alignment: Qt.AlignRight
+            text: qsTr("Edit Vim Keys…")
+            onClicked: {
+                root.close();
+                root.editKeysRequested();
             }
         }
     }

@@ -24,6 +24,61 @@ FileSortFilterModel::FileSortFilterModel(QObject *parent)
     // A full invalidate() reports its rescue of rows as layoutChanged, not as
     // inserts/removes — without this, Ctrl+H left `count` bindings stale.
     connect(this, &QAbstractItemModel::layoutChanged, this, &FileSortFilterModel::countChanged);
+
+    // Media values arrive a few at a time; re-sort once they settle.
+    m_extraResort.setSingleShot(true);
+    m_extraResort.setInterval(300);
+    connect(&m_extraResort, &QTimer::timeout, this, [this] {
+        if (m_sortKey == ByExtra)
+            invalidate();
+    });
+}
+
+void FileSortFilterModel::setHiddenNames(const QStringList &names)
+{
+    const QSet<QString> next(names.cbegin(), names.cend());
+    if (next == m_hiddenNames)
+        return;
+    beginFilterChange();
+    m_hiddenNames = next;
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    Q_EMIT hiddenNamesChanged();
+}
+
+void FileSortFilterModel::setExtraSource(QObject *source)
+{
+    if (m_extraSource == source)
+        return;
+    if (m_extraSource)
+        disconnect(m_extraSource, nullptr, this, nullptr);
+    m_extraSource = source;
+    if (m_extraSource && m_extraSource->metaObject()->indexOfSignal("changed()") >= 0)
+        connect(m_extraSource, SIGNAL(changed()), &m_extraResort, SLOT(start()));
+    Q_EMIT extraSortChanged();
+    if (m_sortKey == ByExtra)
+        invalidate();
+}
+
+void FileSortFilterModel::setExtraSortField(const QString &field)
+{
+    if (m_extraSortField == field)
+        return;
+    m_extraSortField = field;
+    Q_EMIT extraSortChanged();
+    if (m_sortKey == ByExtra)
+        invalidate();
+}
+
+QVariant FileSortFilterModel::extraValue(const QModelIndex &index) const
+{
+    if (!m_extraSource || m_extraSortField.isEmpty())
+        return {};
+    QVariant value;
+    QMetaObject::invokeMethod(m_extraSource.data(), "sortValue", Qt::DirectConnection,
+                              Q_RETURN_ARG(QVariant, value),
+                              Q_ARG(QString, index.data(DirectoryModel::FilePathRole).toString()),
+                              Q_ARG(QString, m_extraSortField));
+    return value;
 }
 
 void FileSortFilterModel::applySort()
@@ -126,6 +181,9 @@ bool FileSortFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sou
     if (m_foldersOnly && !idx.data(DirectoryModel::IsDirRole).toBool())
         return false;
 
+    if (!m_hiddenNames.isEmpty() && m_hiddenNames.contains(idx.data(DirectoryModel::NameRole).toString()))
+        return false;
+
     if (!m_nameFilter.trimmed().isEmpty()
         && (!m_nameFilterError.isEmpty()
             || !m_namePattern.match(idx.data(DirectoryModel::DisplayNameRole).toString()).hasMatch()))
@@ -225,6 +283,28 @@ bool FileSortFilterModel::lessThan(const QModelIndex &left, const QModelIndex &r
         const QString r = right.data(DirectoryModel::PermissionsRole).toString();
         if (l != r)
             return l < r;
+        break;
+    }
+    case ByExtra: {
+        const QVariant l = extraValue(left);
+        const QVariant r = extraValue(right);
+        // Unknown values (not media, or not read yet) sort after known ones,
+        // whichever way the column is sorted.
+        if (l.isValid() != r.isValid())
+            return m_sortDescending ? !l.isValid() : l.isValid();
+        if (l.isValid()) {
+            if (l.typeId() == QMetaType::QString) {
+                const int cmp = m_collator.compare(l.toString(), r.toString());
+                if (cmp != 0)
+                    return cmp < 0;
+            } else {
+                const QPartialOrdering order = QVariant::compare(l, r);
+                if (order == QPartialOrdering::Less)
+                    return true;
+                if (order == QPartialOrdering::Greater)
+                    return false;
+            }
+        }
         break;
     }
     case ByName:

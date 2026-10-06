@@ -40,6 +40,15 @@ class FileOperations : public QObject
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
     Q_PROPERTY(QString redoLabel READ redoLabel NOTIFY historyChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    // The pro operation queue: a paused queue holds the running transfer
+    // between chunks and starts nothing new; the limit caps copy speed in
+    // bytes per second (0 = none).
+    Q_PROPERTY(bool paused READ paused WRITE setPaused NOTIFY pausedChanged)
+    Q_PROPERTY(qint64 speedLimit READ speedLimit WRITE setSpeedLimit NOTIFY speedLimitChanged)
+    // Verify after copy: each finished copy is checked file by file against
+    // its originals with SHA-256, in the background.
+    Q_PROPERTY(bool verifyCopies READ verifyCopies WRITE setVerifyCopies NOTIFY verifyCopiesChanged)
+    Q_PROPERTY(bool verifying READ verifying NOTIFY verifyingChanged)
 
 public:
     // Mirrors ConflictPolicy for QML, which cannot see a scoped enum.
@@ -70,6 +79,20 @@ public:
     bool canRedo() const { return !m_redoStack.isEmpty(); }
     QString redoLabel() const;
     QString lastError() const { return m_lastError; }
+    bool paused() const { return m_paused; }
+    void setPaused(bool paused);
+    qint64 speedLimit() const { return m_speedLimit; }
+    void setSpeedLimit(qint64 bytesPerSecond);
+    bool verifyCopies() const { return m_verifyCopies; }
+    void setVerifyCopies(bool verify);
+    bool verifying() const { return m_verifying > 0; }
+
+    // Moves a queued (not yet running) operation up (-1) or down (+1).
+    Q_INVOKABLE void moveOperation(double id, int delta);
+
+    // The verification itself, synchronous: every (source, copy) pair whose
+    // contents differ, or that can no longer be read. Public for the tests.
+    static QStringList mismatchedCopies(const QList<QPair<QString, QString>> &pairs);
 
     Q_INVOKABLE void createFolder(const QString &parentDir, const QString &name);
     Q_INVOKABLE void rename(const QString &path, const QString &newName);
@@ -148,6 +171,13 @@ Q_SIGNALS:
     // An extract looks like a decompression bomb; the window asks.
     void largeExtractionNeedsConfirmation(const QString &archiveName);
     void trashUnavailable(const QStringList &paths, QObject *requester);
+    void pausedChanged();
+    void speedLimitChanged();
+    void verifyCopiesChanged();
+    void verifyingChanged();
+    // A verify-after-copy finished: how many files were checked, and the
+    // copies that don't match their originals (empty when all is well).
+    void verificationFinished(int checked, const QStringList &mismatched);
 
     // Internal: hands work to the worker thread.
     void dispatch(const FileOperationRequest &request, quint64 id);
@@ -202,6 +232,7 @@ private:
     void setBusy(bool busy);
     void setStatus(const QString &text, qreal progress);
     void setError(const QString &message);
+    void verify(const FileOperationResult &result);
 
     QThread m_thread;
     FileOperationWorker *m_worker = nullptr;
@@ -226,6 +257,11 @@ private:
     qint64 m_currentDone = 0;
     qint64 m_currentTotal = 0;
     QElapsedTimer m_currentClock;
+
+    bool m_paused = false;
+    qint64 m_speedLimit = 0;
+    bool m_verifyCopies = false;
+    int m_verifying = 0;
 
     QList<UndoEntry> m_undoStack;
     QList<RedoEntry> m_redoStack;

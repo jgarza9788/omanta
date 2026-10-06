@@ -187,6 +187,8 @@ Item {
                     }
 
                     TextEdit {
+                        id: codeText
+                        objectName: "previewText"
                         textFormat: TextEdit.PlainText
                         text: info.text
                         readOnly: true
@@ -196,6 +198,26 @@ Item {
                         selectedTextColor: Colors.selectionText
                         font.family: "monospace"
                         font.pixelSize: Math.round((root.compact ? 10 : 12) * root.zoom)
+
+                        // Pro: colour the code by language, in the theme.
+                        SyntaxHighlighter {
+                            id: highlighter
+                            objectName: "syntaxHighlighter"
+                            document: codeText.textDocument
+                            fileName: info.name
+                            enabled: Settings.proFeatures
+                            keywordColor: Colors.accent
+                            stringColor: Colors.dark ? "#a6d189" : "#40a02b"
+                            commentColor: Colors.textDim
+                            numberColor: Colors.dark ? "#ef9f76" : "#d05f0e"
+                            typeColor: Colors.dark ? "#8caaee" : "#1e66f5"
+                        }
+
+                        // A new file's text: pick the language again (a #! line).
+                        Connections {
+                            target: info
+                            function onLoaded() { highlighter.refresh(); }
+                        }
                     }
                 }
 

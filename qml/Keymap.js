@@ -92,8 +92,78 @@ var classicGroups = [
         ["Ctrl+,", "Preferences"], ["Ctrl+?", "Keyboard shortcuts"]] }
 ];
 
+// Pro features (main menu → Pro Features): listed only while they are on.
+var proGroups = [
+    { name: "Pro features", rows: [
+        ["Ctrl+P", "Command palette: jump to a folder or run an action"],
+        [": (vim keys)", "Command palette"],
+        ["' then a letter (vim keys)", "Mark this folder under that letter"],
+        ["` then a letter (vim keys)", "Jump to the folder marked with that letter"],
+        ["F4", "Terminal pane in the current folder"],
+        ["Tab (location bar)", "Complete the folder name"],
+        ["Ctrl+Shift+C", "Compare the two panes (split view)"],
+        ["Enter on an archive", "Browse inside it as a folder"]] }
+];
+
 // The overlay: vim keys first when they are on, then everything that works
-// in both modes.
-function groups(mode) {
-    return mode === "vim" ? vimGroups.concat(classicGroups) : classicGroups;
+// in both modes, then the pro keys while pro features are on.
+function groups(mode, pro) {
+    const base = mode === "vim" ? vimGroups.concat(classicGroups) : classicGroups;
+    return pro ? base.concat(proGroups) : base;
+}
+
+// The vim keys the keymap editor can move: one row per single-key action,
+// [default key, what it does]. Tab.qml dispatches on the default key; a
+// remap only changes which key reaches it.
+var vimActions = [
+    ["j", "Move down"], ["k", "Move up"], ["h", "Parent / left"], ["l", "Open / right"],
+    ["J", "Extend selection down"], ["K", "Extend selection up"],
+    ["g", "First item"], ["G", "Last item"], ["-", "Parent folder"], ["~", "Home folder"],
+    ["v", "Toggle the current item"], ["V", "Select all"], ["/", "Filter this folder"],
+    ["*", "Select by pattern"], ["f", "Search below this folder"], [".", "Show hidden files"],
+    ["s", "Cycle sort"], ["i", "Info panel"], ["y", "Copy"], ["x", "Cut"], ["p", "Paste"],
+    ["Y", "Duplicate"], ["P", "Picture-in-picture"], ["c", "Copy to the other pane"],
+    ["m", "Move to the other pane"], ["r", "Rename"], ["a", "New folder"],
+    ["D", "Move to trash"], ["u", "Undo"], ["U", "Redo"], ["o", "Actions menu"],
+    ["t", "New tab"], ["q", "Close tab"], ["b", "Browse the sidebar"], ["?", "All keys"],
+    [":", "Command palette (pro)"], ["'", "Set a mark (pro)"], ["`", "Jump to a mark (pro)"]
+];
+
+// "j=n;k=e" → { j: "n", k: "e" }: each action's custom key.
+function parseRemap(text) {
+    const out = {};
+    for (const part of (text || "").split(";")) {
+        const eq = part.indexOf("=");
+        if (eq <= 0)
+            continue;
+        const action = part.slice(0, eq);
+        const key = part.slice(eq + 1);
+        if (key.length === 1 && vimActions.some(a => a[0] === action))
+            out[action] = key;
+    }
+    return out;
+}
+
+function formatRemap(map) {
+    const parts = [];
+    for (const action in map)
+        if (map[action] && map[action] !== action)
+            parts.push(action + "=" + map[action]);
+    return parts.join(";");
+}
+
+// What a pressed key means under a remap: the default key of the action it
+// now triggers, "" for a default key whose action moved elsewhere (it does
+// nothing), or the key itself when no remap touches it.
+function translate(remap, key) {
+    if (!remap)
+        return key;
+    let moved = false;
+    for (const action in remap) {
+        if (remap[action] === key)
+            return action;
+        if (action === key)
+            moved = true;
+    }
+    return moved ? "" : key;
 }

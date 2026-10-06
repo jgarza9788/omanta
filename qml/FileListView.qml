@@ -24,13 +24,28 @@ Item {
         permissions: { label: qsTr("Permissions"), sortKey: FileSortFilterModel.ByPermissions, width: 110 },
         modified:    { label: qsTr("Modified"),    sortKey: FileSortFilterModel.ByModified,    width: 150 },
         created:     { label: qsTr("Created"),     sortKey: FileSortFilterModel.ByCreated,     width: 150 },
-        accessed:    { label: qsTr("Accessed"),    sortKey: FileSortFilterModel.ByAccessed,    width: 150 }
+        accessed:    { label: qsTr("Accessed"),    sortKey: FileSortFilterModel.ByAccessed,    width: 150 },
+        // Pro: media details, read in the background by MediaInfo.
+        dimensions:  { label: qsTr("Dimensions"),  sortKey: FileSortFilterModel.ByExtra, field: "dimensions", width: 110 },
+        duration:    { label: qsTr("Length"),      sortKey: FileSortFilterModel.ByExtra, field: "duration",   width: 80 },
+        artist:      { label: qsTr("Artist"),      sortKey: FileSortFilterModel.ByExtra, field: "artist",     width: 140 },
+        album:       { label: qsTr("Album"),       sortKey: FileSortFilterModel.ByExtra, field: "album",      width: 140 },
+        photoDate:   { label: qsTr("Photo Taken"), sortKey: FileSortFilterModel.ByExtra, field: "photoDate",  width: 150 }
     })
 
     // The live column set — follows the Settings notify, so a change in the
     // Visible Columns dialog (or a hand edit of the settings file) lands here
     // without a reload.
-    readonly property var listColumns: Settings.listVisibleColumns
+    readonly property var listColumns: Settings.proFeatures
+        ? Settings.listVisibleColumns.concat(Settings.proListColumns)
+        : Settings.listVisibleColumns
+
+    // A column is the sorted one when its key (and, for the media columns,
+    // its field) is the tab's.
+    function isSortColumn(meta) {
+        return root.tab.sortKey === meta.sortKey
+            && (meta.sortKey !== FileSortFilterModel.ByExtra || root.tab.extraSortField === meta.field);
+    }
 
     readonly property real fixedWidth: {
         let total = 0;
@@ -55,6 +70,12 @@ Item {
                              : Platform.formatModified(row.created, Settings.dateTimeFormat);
         case "accessed": return isNaN(row.accessed) ? "—"
                              : Platform.formatModified(row.accessed, Settings.dateTimeFormat);
+        case "dimensions":
+        case "duration":
+        case "artist":
+        case "album":
+        case "photoDate":
+            return row.isDir ? "" : (MediaInfo.revision, MediaInfo.text(row.filePath, id));
         }
         return "";
     }
@@ -104,14 +125,14 @@ Item {
                             Text {
                                 textFormat: Text.PlainText
                                 text: meta.label
-                                color: root.tab.sortKey === meta.sortKey ? Colors.text : Colors.textDim
+                                color: root.isSortColumn(meta) ? Colors.text : Colors.textDim
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
                             }
 
                             Text {
                                 textFormat: Text.PlainText
-                                visible: root.tab.sortKey === meta.sortKey
+                                visible: root.isSortColumn(meta)
                                 text: root.tab.sortDescending ? "▾" : "▴"
                                 color: Colors.accent
                                 font.pixelSize: 10
@@ -121,7 +142,7 @@ Item {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: root.tab.setSort(meta.sortKey)
+                            onClicked: root.tab.setSort(meta.sortKey, meta.field)
                         }
                     }
                 }
@@ -283,7 +304,18 @@ Item {
                                 elide: Text.ElideMiddle
                                 width: Math.max(0, Math.min(implicitWidth,
                                                 nameCell.width - root.iconSize - 8
-                                                - (root.tab.treeActive ? row.depth * 18 + 22 : 0)))
+                                                - (root.tab.treeActive ? row.depth * 18 + 22 : 0)
+                                                - proMarks.width - (proMarks.visible ? 8 : 0)))
+                            }
+
+                            // Pro: tag dots and the git badge after the name.
+                            ProMarks {
+                                id: proMarks
+                                anchors.verticalCenter: parent.verticalCenter
+                                tab: root.tab
+                                name: row.name
+                                filePath: row.targetPath !== "" ? row.targetPath : row.filePath
+                                selected: root.tab.isSelected(row.name)
                             }
                         }
                     }
