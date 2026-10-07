@@ -1817,6 +1817,7 @@ Window {
 
     ConflictDialog {
         id: conflictDialog
+        objectName: "conflictDialog"
         onClosed: root.returnFocusToView()
         onChosen: policy => root.performTransfer(policy)
     }

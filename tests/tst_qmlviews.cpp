@@ -104,6 +104,7 @@ private Q_SLOTS:
     void selectionAndVirtualDelegates();
     void emptyTrashRefreshesOpenViews();
     void pasteKeepsCopiedFilesOnClipboard();
+    void conflictDialogKeyboard();
     void moveAndCopyToPickedFolder();
     void thumbnailsFollowInPlaceEdits();
     void dragPreviewSurvivesItsOwner();
@@ -1463,6 +1464,226 @@ void TestQmlViews::pasteKeepsCopiedFilesOnClipboard()
 
 // "Move to…" / "Copy to…": the picked folder feeds the same
 // transfer flow as paste, clash check included.
+void TestQmlViews::conflictDialogKeyboard()
+{
+    QTest::failOnWarning(QRegularExpression("Required property|Cannot assign.*undefined|TypeError"));
+    TempTree tree;
+    QTemporaryDir config;
+    for (const char *env : {"OMANTA_SETTINGS_FILE", "OMANTA_STARRED_FILE",
+                           "OMANTA_SERVERS_FILE", "OMANTA_BOOKMARKS_FILE"})
+        qputenv(env, config.filePath(env).toUtf8());
+    qputenv("OMANTA_COLORS_FILE", config.filePath("missing/parent/colors.toml").toUtf8());
+    QVERIFY(QDir().mkpath(tree.filePath("source")));
+    QVERIFY(QDir().mkpath(tree.filePath("target")));
+    const auto write = [](const QString &path, const QByteArray &contents) {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write(contents);
+    };
+    const auto read = [](const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QString source = tree.filePath("source/a.txt");
+    const QString clash = tree.filePath("target/a.txt");
+    write(source, "new");
+    write(clash, "old");
+    const auto fileCount = [&] { return QDir(tree.filePath("target")).entryList(QDir::Files).size(); };
+
+    QQmlApplicationEngine engine;
+    engine.addImageProvider("fileicon", new IconImageProvider);
+    engine.addImageProvider("thumbnail", new ThumbnailProvider);
+    Application application(&engine);
+    Platform platform;
+    SystemTheme theme;
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "App", &application);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Platform", &platform);
+    qmlRegisterSingletonInstance("Omanta.Runtime", 1, 0, "Theme", &theme);
+    application.openWindow(tree.filePath("target"));
+    QQuickWindow *window = nullptr;
+    for (QObject *child : application.children()) {
+        if (child->property("currentTab").isValid()) {
+            window = qobject_cast<QQuickWindow *>(child);
+            break;
+        }
+    }
+    QVERIFY(window);
+    window->requestActivate();
+    QTRY_VERIFY(window->isActive());
+    auto *clipboard = engine.singletonInstance<Clipboard *>("Omanta", "Clipboard");
+    auto *operations = engine.singletonInstance<QObject *>("Omanta", "FileOperations");
+    auto *dialog = window->findChild<QObject *>("conflictDialog");
+    QVERIFY(clipboard);
+    QVERIFY(operations);
+    QVERIFY(dialog);
+    const auto button = [window](const char *name) {
+        return findItem(window->contentItem(), "objectName", QString::fromLatin1(name));
+    };
+    const auto hasFocus = [&](const char *name) {
+        QQuickItem *item = button(name);
+        return item && item->hasActiveFocus();
+    };
+
+    // Each round pastes the clashing file again and waits for the question.
+    const auto ask = [&] {
+        clipboard->copyFiles({source});
+        QVERIFY(QMetaObject::invokeMethod(window, "paste"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(hasFocus("conflictKeepBoth"));
+    };
+    const auto answered = [&] {
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTRY_VERIFY(!operations->property("busy").toBool());
+    };
+
+    // Esc backs out: nothing lands.
+    ask();
+    QTest::keyClick(window, Qt::Key_Escape);
+    answered();
+    QCOMPARE(fileCount(), 1);
+    QCOMPARE(read(clash), QByteArray("old"));
+
+    // S skips the clash.
+    ask();
+    QTest::keyClick(window, Qt::Key_S);
+    answered();
+    QCOMPARE(fileCount(), 1);
+    QCOMPARE(read(clash), QByteArray("old"));
+
+    // Return alone picks the safe default, Keep both.
+    ask();
+    QTest::keyClick(window, Qt::Key_Return);
+    answered();
+    QTRY_COMPARE(fileCount(), 2);
+    QCOMPARE(read(clash), QByteArray("old"));
+
+    // K keeps both too.
+    ask();
+    QTest::keyClick(window, Qt::Key_K);
+    answered();
+    QTRY_COMPARE(fileCount(), 3);
+    QCOMPARE(read(clash), QByteArray("old"));
+
+    // The arrows walk the buttons as they sit on screen, Skip · Replace ·
+    // Keep both, stopping at the ends; Return clicks the focused one, which
+    // shows a focus ring.
+    ask();
+    QVERIFY(button("conflictSkip")->x() < button("conflictReplace")->x());
+    QVERIFY(button("conflictReplace")->x() < button("conflictKeepBoth")->x());
+    QVERIFY(button("conflictKeepBoth")->property("visualFocus").toBool());
+    QTest::keyClick(window, Qt::Key_Right);
+    QVERIFY(hasFocus("conflictKeepBoth"));
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictReplace"));
+    QVERIFY(button("conflictReplace")->property("visualFocus").toBool());
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictSkip"));
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictSkip"));
+    QTest::keyClick(window, Qt::Key_Right);
+    QVERIFY(hasFocus("conflictReplace"));
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictSkip"));
+    QTest::keyClick(window, Qt::Key_Return);
+    answered();
+    QCOMPARE(fileCount(), 3);
+    QCOMPARE(read(clash), QByteArray("old"));
+
+    ask();
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictReplace"));
+    QTest::keyClick(window, Qt::Key_Return);
+    answered();
+    QTRY_COMPARE(read(clash), QByteArray("new"));
+    QCOMPARE(fileCount(), 3);
+
+    // Pasting from the context menu: the menu closes while the dialog opens
+    // and must not take the keys back to the view behind it.
+    auto *menu = window->findChild<QObject *>("contextMenu");
+    QVERIFY(menu);
+    const auto pasteFromMenu = [&] {
+        clipboard->copyFiles({source});
+        QVERIFY(QMetaObject::invokeMethod(menu, "popup"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QQuickItem *entry = nullptr;
+        for (int i = 0; i < menu->property("count").toInt() && !entry; ++i) {
+            QQuickItem *item = nullptr;
+            QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, i));
+            if (item && item->property("text").toString() == QLatin1String("Paste"))
+                entry = item;
+        }
+        QVERIFY(entry);
+        QTest::mouseClick(window, Qt::LeftButton, {},
+                          entry->mapToScene(QPointF(entry->width() / 2, entry->height() / 2)).toPoint());
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        QTRY_VERIFY(hasFocus("conflictKeepBoth"));
+    };
+    pasteFromMenu();
+    QTest::keyClick(window, Qt::Key_Left);
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictSkip"));
+    QTest::keyClick(window, Qt::Key_Return);
+    answered();
+    QCOMPARE(fileCount(), 3);
+
+    // Copy to… through the folder picker: the picker closes after the
+    // dialog opens, and must not hand the keys back to the view.
+    QObject *picker = nullptr;
+    for (QObject *child : window->findChildren<QObject *>()) {
+        if (child->property("acceptLabel").toString() == QLatin1String("Copy Here"))
+            picker = child;
+    }
+    QVERIFY(picker);
+    picker->setProperty("pendingPaths", QStringList{source});
+    QVERIFY(QMetaObject::invokeMethod(picker, "askFor", Q_ARG(QVariant, tree.filePath("target")),
+                                      Q_ARG(QVariant, QStringLiteral("Copy to"))));
+    QTRY_VERIFY(picker->property("opened").toBool());
+    QQuickItem *accept = nullptr;
+    QList<QQuickItem *> labelled;
+    collectItems(window->contentItem(), "text", QStringLiteral("Copy Here"), labelled);
+    for (QQuickItem *item : labelled) {
+        if (item->inherits("QQuickAbstractButton"))
+            accept = item;
+    }
+    QVERIFY(accept);
+    QTest::mouseClick(window, Qt::LeftButton, {},
+                      accept->mapToScene(QPointF(accept->width() / 2, accept->height() / 2)).toPoint());
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QTRY_VERIFY(!picker->property("visible").toBool());
+    QTRY_VERIFY(hasFocus("conflictKeepBoth"));
+    QTest::keyClick(window, Qt::Key_Left);
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(hasFocus("conflictSkip"));
+    QTest::keyClick(window, Qt::Key_Return);
+    answered();
+    QCOMPARE(fileCount(), 3);
+
+    // Something handing the focus back to the view behind it (a closing
+    // menu or picker) must not leave the arrows moving the selection there.
+    write(clash, "old");
+    ask();
+    QVERIFY(QMetaObject::invokeMethod(window, "returnFocusToView"));
+    QTRY_VERIFY(hasFocus("conflictKeepBoth"));
+    QTest::keyClick(window, Qt::Key_Left);
+    QTest::keyClick(window, Qt::Key_Left);
+    QVERIFY(dialog->property("visible").toBool());
+    QVERIFY(hasFocus("conflictSkip"));
+    QTest::keyClick(window, Qt::Key_Return);
+    answered();
+    QCOMPARE(fileCount(), 3);
+    QCOMPARE(read(clash), QByteArray("old"));
+
+    // R replaces straight away.
+    write(clash, "old");
+    ask();
+    QTest::keyClick(window, Qt::Key_R);
+    answered();
+    QTRY_COMPARE(read(clash), QByteArray("new"));
+    QCOMPARE(fileCount(), 3);
+    QVERIFY(QFileInfo::exists(source));
+}
+
 void TestQmlViews::moveAndCopyToPickedFolder()
 {
     QTest::failOnWarning(QRegularExpression("Required property|Cannot assign.*undefined|TypeError"));

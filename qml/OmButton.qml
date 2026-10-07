@@ -48,5 +48,17 @@ Button {
                     : Colors.border
         opacity: control.enabled ? 1 : 0.6
         Behavior on color { ColorAnimation { duration: 90 } }
+
+        // Keyboard focus: a ring outside the button, so it shows whatever
+        // the role's own fill and border are.
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -4
+            radius: parent.radius + 4
+            color: "transparent"
+            border.width: 2
+            border.color: Colors.accent
+            visible: control.visualFocus
+        }
     }
 }

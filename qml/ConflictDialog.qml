@@ -23,21 +23,77 @@ OmDialog {
         open();
     }
 
+    function choose(policy) {
+        root.chosen(policy);
+        root.close();
+    }
+
+    // The button Return acts on. Keep both comes first, so Return alone is
+    // the safe answer.
+    property Item current: keepBothButton
+
+    function select(button) {
+        if (!visible)
+            return;
+        current = button;
+        button.forceActiveFocus(Qt.TabFocusReason);
+        // Reopening, the popup restores focus to it with a non-keyboard
+        // reason first, and that would hide the focus ring.
+        button.focusReason = Qt.TabFocusReason;
+    }
+
+    // The arrows walk the buttons as they sit on screen, which the button
+    // box arranges by role (Skip · Replace · Keep both), not as declared.
+    function step(by) {
+        const row = [keepBothButton, skipButton, replaceButton].sort((a, b) => a.x - b.x);
+        const at = row.indexOf(current);
+        select(row[Math.max(0, Math.min(row.length - 1, at + by))]);
+    }
+
+    onOpened: select(keepBothButton)
+
+    // While this is open, the keys belong to it. A menu or picker that
+    // closes as this opens hands the focus back to the view behind, where the
+    // arrows would move the selection instead; take it straight back.
+    Connections {
+        target: root.visible ? root.contentItem.Window.window : null
+        function onActiveFocusItemChanged() {
+            if (!root.current.activeFocus)
+                Qt.callLater(root.select, root.current);
+        }
+    }
+
+    Shortcut { enabled: root.visible; sequence: "K"; onActivated: root.choose(FileOperations.RenameNew) }
+    Shortcut { enabled: root.visible; sequence: "S"; onActivated: root.choose(FileOperations.Skip) }
+    Shortcut { enabled: root.visible; sequence: "R"; onActivated: root.choose(FileOperations.Replace) }
+    Shortcut { enabled: root.visible; sequences: ["Left", "H"]; onActivated: root.step(-1) }
+    Shortcut { enabled: root.visible; sequences: ["Right", "L"]; onActivated: root.step(1) }
+    Shortcut { enabled: root.visible; sequences: ["Return", "Enter"]; onActivated: root.current.clicked() }
+
     footer: OmButtonBox {
         OmButton {
+            id: keepBothButton
+            objectName: "conflictKeepBoth"
             text: qsTr("Keep both")
             DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-            onClicked: { root.chosen(FileOperations.RenameNew); root.close(); }
+            onActiveFocusChanged: if (activeFocus) root.current = keepBothButton
+            onClicked: root.choose(FileOperations.RenameNew)
         }
         OmButton {
+            id: skipButton
+            objectName: "conflictSkip"
             text: qsTr("Skip")
             DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
-            onClicked: { root.chosen(FileOperations.Skip); root.close(); }
+            onActiveFocusChanged: if (activeFocus) root.current = skipButton
+            onClicked: root.choose(FileOperations.Skip)
         }
         OmButton {
+            id: replaceButton
+            objectName: "conflictReplace"
             text: qsTr("Replace")
             DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole
-            onClicked: { root.chosen(FileOperations.Replace); root.close(); }
+            onActiveFocusChanged: if (activeFocus) root.current = replaceButton
+            onClicked: root.choose(FileOperations.Replace)
         }
     }
 
@@ -70,9 +126,10 @@ OmDialog {
         Text {
             textFormat: Text.PlainText
             width: parent.width
-            text: qsTr("Replacing cannot be undone.")
+            text: qsTr("K keep both · S skip · R replace · Esc cancel. Replacing cannot be undone.")
             color: Colors.textDim
             font.pixelSize: 12
+            wrapMode: Text.WordWrap
         }
     }
 }
